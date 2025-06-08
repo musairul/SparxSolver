@@ -11,7 +11,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 - **🖼️ LaTeX Rendering**: Beautiful mathematical notation using KaTeX
 - **📸 Screenshot Analysis**: Automatically captures screenshots of math problems from Sparx Learning, even if the question is obscured (no need to zoom out!)
 
-![SparxSolver solving a maths question](<Screenshot 2025-06-07 182545.png>)
+![SparxSolver solving a maths question](<sparxsolverdemo.png>)
 
 ## 🛠️ Installation & Setup
 
