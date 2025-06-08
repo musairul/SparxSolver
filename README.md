@@ -61,9 +61,9 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 
 ## ⚠️ Disclaimer
 
-**Educational Use Only**: This extension is designed to help students understand mathematical concepts and problem-solving approaches. Please use responsibly and in accordance with your institution's academic integrity policies.
+- **Educational Use Only**: This extension is designed to help students understand mathematical concepts and problem-solving approaches. Please use responsibly and in accordance with your institution's academic integrity policies.
 
-**Privacy**: Your API key and bookwork are stored locally in your browser. No data is sent to external servers except for AI processing through Google's Generative AI service.
+- **Privacy**: Your API key and bookwork are stored locally in your browser. No data is sent to external servers except for AI processing through Google's Generative AI service.
 
 ## 📞 Support, Bugs, Features
 
