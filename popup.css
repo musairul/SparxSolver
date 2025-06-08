@@ -1,0 +1,331 @@
+body {
+  font-family: sans-serif;
+  width: auto;
+  padding: 10px;
+  font-size: 16px; /* Set a base font size */
+  /* The iframe container will handle borders and radius */
+}
+
+#header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #f1f1f1;
+  border-bottom: 1px solid #ddd;
+  margin: -10px -10px 10px -10px;
+  color: #333;
+}
+
+#heading {
+  margin: 0;
+  font-size: 1.1em;
+  font-weight: bold;
+  color: #333;
+}
+
+#solveButton {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1em;
+}
+
+#solveButton:hover {
+  background-color: #45a049;
+}
+
+#loadingIndicator {
+  text-align: center;
+  margin-bottom: 10px;
+  display: none; /* Hidden by default */
+}
+
+#resultContainer {
+  border: 1px solid #ccc;
+  padding: 10px;
+  min-height: 50px;
+  white-space: pre-wrap; /* To respect newlines and spaces in the solution */
+  word-wrap: break-word;
+  display: none; /* Hidden by default */
+}
+
+/* New styles for code blocks and inline code */
+pre.code-block {
+  background-color: #f0f0f0; /* Light grey background for code blocks */
+  border: 1px solid #ddd;
+  padding: 10px;
+  border-radius: 4px;
+  overflow-x: auto; /* Allow horizontal scrolling for long lines of code */
+  white-space: pre; /* Preserve whitespace and newlines strictly within the code block */
+  font-family: monospace;
+}
+
+/* For inline code snippets */
+code {
+  background-color: #e0e0e0; /* Slightly different grey for inline code */
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+/* Reset background and padding for code elements inside a pre.code-block \
+   as the pre block itself provides these */
+pre.code-block code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0; /* Reset if needed, but usually not visible */
+  /* font-family is inherited from pre.code-block or can be re-specified if necessary */
+}
+
+/* Styling for the prominently displayed final answer */
+.final-answer-display {
+  font-size: 1.2em; /* Makes the text larger */
+  font-weight: bold; /* Makes the text bold */
+  padding: 5px; /* Adds some padding around the text */
+}
+
+/* Styling for code blocks - styles are defined above in pre.code-block */
+
+/* Tabbed interface styles */
+#tabHeader {
+  display: flex;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 10px;
+}
+.tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  cursor: pointer;
+  font-weight: bold;
+  background: #f8f8f8;
+  border: 1px solid #ccc;
+  border-bottom: none;
+  margin-right: 2px;
+  transition: background 0.2s, color 0.2s;
+  font-size: 1em;
+}
+.close-btn {
+  position: relative; /* Required for the pseudo-element */
+  z-index: 1; /* Ensures the 'x' is on top */
+  padding: 10px; /* Provides space for the ::before to expand into */
+  margin: -10px; /* Counteracts the padding to prevent layout shift */
+  font-size: 22px;
+  font-weight: bold;
+  color: #888;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  line-height: 1; /* Ensures tight vertical alignment */
+}
+
+.close-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+}
+
+.close-btn:hover {
+  color: #333;
+  background-color: transparent;
+}
+.tab-btn:last-of-type {
+  margin-right: 0;
+}
+.tab-active {
+  background: #a6a7a6;
+  color: #fff;
+  border-bottom: 2px solid #000000;
+  z-index: 1;
+}
+
+/* Image Preview Modal */
+#imagePreviewModal {
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: none; /* Hidden by default */
+  justify-content: center;
+  align-items: center;
+}
+#imagePreviewModal .modal-content {
+  max-width: 90%;
+  max-height: 90%;
+  transition: transform 0.2s ease;
+  transform-origin: center center;
+}
+#imagePreviewModal .modal-close {
+  position: absolute;
+  top: 15px;
+  right: 35px;
+  color: #f1f1f1;
+  font-size: 40px;
+  font-weight: bold;
+  transition: 0.3s;
+  cursor: pointer;
+}
+#imagePreviewModal .modal-close:hover,
+#imagePreviewModal .modal-close:focus {
+  color: #bbb;
+  text-decoration: none;
+}
+
+.zoom-controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  padding: 5px;
+  display: flex;
+  z-index: 1001;
+}
+
+.zoom-controls button {
+  background-color: #fff;
+  border: 1px solid #ccc;
+  color: #000;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  margin: 0 5px;
+  border-radius: 3px;
+}
+
+.zoom-controls button:hover {
+  background-color: #f0f0f0;
+}
+
+/* Clear Button Style */
+#clearBookworksBtn {
+  background-color: #f44336; /* Red */
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 0.9em;
+  margin: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+#clearBookworksBtn:hover {
+  background-color: #d32f2f;
+}
+
+/* New Gallery Header Style */
+.gallery-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.gallery-header h3 {
+  margin: 0;
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+.drag-bar-class {
+  display: flex;
+  justify-content: flex-end;
+  padding: 5px;
+  background-color: #f1f1f1;
+  border-bottom: 1px solid #ccc;
+}
+
+/* Final Answer Screen Styles */
+#finalAnswerScreen {
+  padding: 0px;
+  display: none; /* Hidden by default */
+}
+
+#finalAnswerScreen h2 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  color: #333;
+  font-size: 1.3em;
+}
+
+#finalAnswerDisplay {
+  margin-bottom: 10px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+}
+
+#explanationContainer {
+  margin-bottom: 0px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#toggleExplanationBtn {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.9em;
+  margin-left: 0;
+  margin-right: 0;
+  display: block;
+}
+
+#toggleExplanationBtn:hover {
+  background-color: #1976d2;
+}
+
+#explanationText {
+  padding: 10px;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-top: 10px;
+  display: none; /* Hidden by default */
+}
+
+/* API Key Screen Styles */
+#apiKeyScreen {
+  padding: 10px;
+  display: none; /* Hidden by default */
+}
+
+#apiKeyInput {
+  width: calc(100% - 22px);
+  margin-bottom: 10px;
+  padding: 8px;
+}
+
+#saveApiKeyButton {
+  width: 100%;
+  padding: 10px;
+}
+
+#changeApiKeyButton {
+  font-size: 0.7em;
+  padding: 2px 5px;
+  display: none; /* Hidden by default */
+  margin-right: -175px;
+}

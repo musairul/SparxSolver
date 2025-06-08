@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "SparxSolver",
+  "version": "1.0.0",
+  "description": "Solves math problems from screenshots using AI.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
+    "*://*.sparx-learning.com/*"
+  ],
+  "action": {
+    "default_icon": {
+      "128": "icon.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.sparx-learning.com/*"
+      ],
+      "js": [
+        "libs/html2canvas.min.js",
+        "bookwork.js",
+        "content.js"
+      ],
+      "css": [
+        "popup.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "128": "icon.png"
+  },  "web_accessible_resources": [
+    {
+      "resources": [
+        "libs/html2canvas.min.js",
+        "popup.html",
+        "systemprompt.txt"
+      ],
+      "matches": [
+        "*://*.sparx-learning.com/*"
+      ]
+    }
+  ]
+} 

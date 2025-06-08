@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sparx Solver</title>
+    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="libs/katex.min.css" />
+  </head>
+  <body>
+    <div id="header">
+      <p id="heading">Sparx Solver</p>
+      <button id="changeApiKeyButton">Change API Key</button>
+      <div id="headerCloseBtn" class="close-btn">&times;</div>
+    </div>
+    <div id="tabHeader">
+      <div id="solveTabBtn" class="tab-btn tab-active">Solve</div>
+      <div id="bookworksTabBtn" class="tab-btn">Bookworks</div>
+    </div>
+    <div id="solveTab">
+      <div id="apiKeyScreen">
+        <h3>Enter API Key</h3>
+        <input
+          type="password"
+          id="apiKeyInput"
+          placeholder="Enter your API Key"
+        />
+        <button id="saveApiKeyButton">Save API Key</button>
+      </div>
+      <button id="solveButton">Solve Math Problem</button>
+      <div id="loadingIndicator">Loading...</div>
+      <div id="resultContainer"></div>
+    </div>
+    <div id="bookworksTab">
+      <div class="gallery-header">
+        <h3>Saved Bookworks</h3>
+        <button id="clearBookworksBtn">Clear</button>
+      </div>
+      <div id="bookworkGallery"></div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="imagePreviewModal">
+      <span class="modal-close">&times;</span>
+      <img class="modal-content" id="modalImage" alt="Enlarged Bookwork" />
+      <div class="zoom-controls">
+        <button id="zoomOutBtn">-</button>
+        <button id="zoomInBtn">+</button>
+      </div>
+    </div>
+
+    <!-- Final Answer Screen -->
+    <div id="finalAnswerScreen">
+      <div id="finalAnswerDisplay"></div>
+      <div id="explanationContainer">
+        <button id="toggleExplanationBtn">Expand Explanation</button>
+        <div id="explanationText">
+          <!-- Explanation will be populated here by popup.js -->
+        </div>
+      </div>
+    </div>
+
+    <script src="libs/katex.min.js"></script>
+    <script src="libs/auto-render.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
