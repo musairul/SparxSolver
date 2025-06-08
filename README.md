@@ -16,8 +16,9 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 ## 🛠️ Installation & Setup
 
 1. **Download the Extension**:
-   - Click on the green Code button and Download zip
+   - Click on [Releases](https://github.com/musairul/SparxSolver/releases) and download the Source code zip
    - Unzip the folder (right click and extract all)
+   - You can now delete the folder ending with .zip
 
 2. **Load the Extension**:
    - Navigate to `chrome://extensions/`
