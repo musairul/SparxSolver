@@ -49,6 +49,22 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 
 **Privacy**: Your API key and bookwork are stored locally in your browser. No data is sent to external servers except for AI processing through Google's Generative AI service.
 
+## 🐛 Troubleshooting
+
+- **Extension not appearing after "Load unpacked"**:
+    - Ensure you have selected the correct `SparxSolver` folder. If you see a `manifest.json` file directly inside the folder you selected, that's the correct one.
+    - Double-check that "Developer mode" is enabled on the `chrome://extensions/` page.
+    - Try restarting Chrome.
+- **"Manifest not found" error**:
+    - You have likely selected the wrong folder. When you unzip the downloaded file, it might create a folder like `SparxSolver-main` and inside that, another `SparxSolver` folder. Make sure you select the inner `SparxSolver` folder that directly contains the `manifest.json` file.
+- **API Key not working**:
+    - Ensure you have copied the API key correctly from Google AI Studio.
+    - Verify that the API key is enabled and has the necessary permissions in your Google Cloud project (if applicable, though for basic MakerSuite keys this is usually handled automatically).
+    - Check if there are any restrictions on the API key (e.g., website restrictions) that might prevent it from working on `maths.sparx-learning.com`.
+- **Extension popup doesn't open**:
+    - Make sure you are on the `maths.sparx-learning.com` website, as the extension is designed to activate only on this domain.
+    - Refresh the page and click on the extension again
+
 ## 📞 Support, Bugs, Features
 
 - **Issues**: Report bugs on [GitHub Issues](https://github.com/yourusername/sparxsolver/issues)
