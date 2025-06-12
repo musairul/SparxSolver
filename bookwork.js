@@ -35,10 +35,19 @@ function blockContinueButton(block) {
     if (block) {
       btn.style.pointerEvents = "none";
       btn.style.opacity = "0.5";
+      document.addEventListener("keydown", preventEnterKey, true);
     } else {
       btn.style.pointerEvents = "";
       btn.style.opacity = "";
+      document.removeEventListener("keydown", preventEnterKey, true);
     }
+  }
+}
+
+function preventEnterKey(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    event.stopPropagation();
   }
 }
 
@@ -89,7 +98,7 @@ function screenshotQuestionDivWithDelay(bookworkCode) {
   blockContinueButton(true);
   setTimeout(() => {
     const questionDiv = document.querySelector(
-      "div._Question_2twe1_5._QuestionCentered_2twe1_56._QuestionAnswerOnly_2twe1_61"
+      "div[class*='_Question_'][class*='_5'][class*='_QuestionCentered_'][class*='_56'][class*='_QuestionAnswerOnly_'][class*='_61']"
     );
     if (!questionDiv) {
       console.log("Question div not found for screenshot.");
