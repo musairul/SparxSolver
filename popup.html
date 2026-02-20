@@ -18,13 +18,30 @@
     </div>
     <div id="solveTab">
       <div id="apiKeyScreen">
-        <h3>Enter API Key</h3>
-        <input
-          type="password"
-          id="apiKeyInput"
-          placeholder="Enter your API Key"
-        />
-        <button id="saveApiKeyButton">Save API Key</button>
+        <h3>Select Provider</h3>
+        <select id="providerSelect">
+          <option value="" disabled selected>Select a provider...</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="cerebras">Cerebras</option>
+          <option value="gemini">Gemini</option>
+          <option value="openai">OpenAI</option>
+          <option value="mistral">Mistral</option>
+          <option value="groq">Groq</option>
+        </select>
+        <div id="apiKeyGroup">
+          <input
+            type="password"
+            id="apiKeyInput"
+            placeholder="Enter your API Key"
+          />
+          <button id="fetchModelsButton">Fetch Models</button>
+        </div>
+        <div id="modelGroup">
+          <select id="modelSelect">
+            <option value="" disabled selected>Select a model...</option>
+          </select>
+          <button id="saveApiKeyButton">Save</button>
+        </div>
       </div>
       <button id="solveButton">Solve Math Problem</button>
       <div id="loadingIndicator">Loading...</div>

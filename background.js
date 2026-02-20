@@ -1,5 +1,33 @@
 // background.js
 
+// Provider configuration - all OpenAI-compatible
+const PROVIDERS = {
+  openrouter: {
+    name: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+  },
+  cerebras: {
+    name: "Cerebras",
+    baseUrl: "https://api.cerebras.ai/v1",
+  },
+  gemini: {
+    name: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+  },
+  openai: {
+    name: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+  },
+  mistral: {
+    name: "Mistral",
+    baseUrl: "https://api.mistral.ai/v1",
+  },
+  groq: {
+    name: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+  },
+};
+
 // Function to load system prompt from file
 async function loadSystemPrompt() {
   try {
@@ -15,7 +43,34 @@ async function loadSystemPrompt() {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "solveMath") {
     captureAndProcessScreenshot(sendResponse);
-    return true; // Indicates that the response will be sent asynchronously
+    return true;
+  }
+  if (request.action === "fetchModels") {
+    const provider = PROVIDERS[request.provider];
+    if (!provider) {
+      sendResponse({ error: "Unknown provider." });
+      return true;
+    }
+    fetch(`${provider.baseUrl}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${request.apiKey}`,
+      },
+    })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`${res.status} ${res.statusText}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        const models = (data.data || []).map((m) => m.id).sort();
+        sendResponse({ models: models });
+      })
+      .catch((err) => {
+        sendResponse({ error: err.message });
+      });
+    return true;
   }
   if (request.action === "saveBookwork") {
     if (request.code && request.url) {
@@ -37,15 +92,30 @@ chrome.runtime.onConnect.addListener(function (port) {
     port.onMessage.addListener(async function (msg) {
       if (msg.action === "solveMath") {
         try {
-          // Fetch API Key from storage
-          const { apiKey: storedApiKey } = await new Promise((resolve) =>
-            chrome.storage.local.get("apiKey", resolve)
+          // Fetch API Key, provider, and model from storage
+          const {
+            apiKey: storedApiKey,
+            provider: storedProvider,
+            model: storedModel,
+          } = await new Promise((resolve) =>
+            chrome.storage.local.get(
+              ["apiKey", "provider", "model"],
+              resolve
+            )
           );
 
-          if (!storedApiKey) {
+          if (!storedApiKey || !storedProvider || !storedModel) {
             port.postMessage({
-              error: "API Key not found. Please set it in the extension popup.",
+              error:
+                "Provider, API Key, or model not configured. Please set them in the extension popup.",
             });
+            port.disconnect();
+            return;
+          }
+
+          const providerConfig = PROVIDERS[storedProvider];
+          if (!providerConfig) {
+            port.postMessage({ error: "Unknown provider." });
             port.disconnect();
             return;
           }
@@ -81,51 +151,34 @@ chrome.runtime.onConnect.addListener(function (port) {
 
           const detailedPrompt = await loadSystemPrompt();
           const requestBody = {
-            contents: [
+            model: storedModel,
+            messages: [
               {
-                parts: [
-                  { text: detailedPrompt },
+                role: "user",
+                content: [
+                  { type: "text", text: detailedPrompt },
                   {
-                    inlineData: {
-                      mimeType: "image/png",
-                      data: base64ImageData,
+                    type: "image_url",
+                    image_url: {
+                      url: `data:image/png;base64,${base64ImageData}`,
                     },
                   },
                 ],
               },
             ],
-            generationConfig: {
-              temperature: 0.3,
-              topK: 32,
-              topP: 1,
-              maxOutputTokens: 4096,
-              stopSequences: [],
-            },
-            safetySettings: [
-              {
-                category: "HARM_CATEGORY_HARASSMENT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE",
-              },
-              {
-                category: "HARM_CATEGORY_HATE_SPEECH",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE",
-              },
-              {
-                category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE",
-              },
-              {
-                category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-                threshold: "BLOCK_MEDIUM_AND_ABOVE",
-              },
-            ],
+            stream: true,
+            max_tokens: 4096,
+            temperature: 0.3,
           };
-          // 2. Stream API Call
+          // 2. Stream API Call (OpenAI-compatible format)
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${storedApiKey}`,
+            `${providerConfig.baseUrl}/chat/completions`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${storedApiKey}`,
+              },
               body: JSON.stringify(requestBody),
             }
           );
@@ -158,7 +211,7 @@ chrome.runtime.onConnect.addListener(function (port) {
                   try {
                     const parsed = JSON.parse(data);
                     const chunk =
-                      parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                      parsed.choices?.[0]?.delta?.content;
                     if (chunk) {
                       port.postMessage({ chunk });
                     }
@@ -187,15 +240,26 @@ chrome.runtime.onConnect.addListener(function (port) {
 
 async function captureAndProcessScreenshot(sendResponse) {
   try {
-    // Fetch API Key from storage
-    const { apiKey: storedApiKey } = await new Promise((resolve) =>
-      chrome.storage.local.get("apiKey", resolve)
+    // Fetch API Key, provider, and model from storage
+    const {
+      apiKey: storedApiKey,
+      provider: storedProvider,
+      model: storedModel,
+    } = await new Promise((resolve) =>
+      chrome.storage.local.get(["apiKey", "provider", "model"], resolve)
     );
 
-    if (!storedApiKey) {
+    if (!storedApiKey || !storedProvider || !storedModel) {
       sendResponse({
-        error: "API Key not found. Please set it in the extension popup.",
+        error:
+          "Provider, API Key, or model not configured. Please set them in the extension popup.",
       });
+      return;
+    }
+
+    const providerConfig = PROVIDERS[storedProvider];
+    if (!providerConfig) {
+      sendResponse({ error: "Unknown provider." });
       return;
     }
 
@@ -206,68 +270,44 @@ async function captureAndProcessScreenshot(sendResponse) {
     if (!dataUrl) {
       sendResponse({ error: "Failed to capture screenshot." });
       return;
-    } // 2. Prepare Image for API (extract base64 data)
-    // The dataUrl is in the format "data:image/png;base64,BASE64_ENCODED_IMAGE_DATA"
-    // We need to extract just the BASE64_ENCODED_IMAGE_DATA part.
+    }
     const base64ImageData = dataUrl.split(",")[1];
 
     const detailedPrompt = await loadSystemPrompt();
 
-    // 3. Construct API Request
+    // 2. Construct API Request (OpenAI-compatible format)
     const requestBody = {
-      contents: [
+      model: storedModel,
+      messages: [
         {
-          parts: [
+          role: "user",
+          content: [
+            { type: "text", text: detailedPrompt },
             {
-              text: detailedPrompt,
-            },
-            {
-              inlineData: {
-                mimeType: "image/png",
-                data: base64ImageData,
+              type: "image_url",
+              image_url: {
+                url: `data:image/png;base64,${base64ImageData}`,
               },
             },
           ],
         },
       ],
-      generationConfig: {
-        // Optional: customize as needed
-        temperature: 0.3,
-        topK: 32,
-        topP: 1,
-        maxOutputTokens: 4096, // Adjust as needed
-        stopSequences: [],
-      },
-      safetySettings: [
-        // Optional: Adjust safety settings
-        {
-          category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_MEDIUM_AND_ABOVE",
-        },
-      ],
+      max_tokens: 4096,
+      temperature: 0.3,
     };
 
-    // 4. Make API Call
-    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${storedApiKey}`;
-    const response = await fetch(GEMINI_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    // 3. Make API Call
+    const response = await fetch(
+      `${providerConfig.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${storedApiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
 
     if (!response.ok) {
       const errorBody = await response.json();
@@ -282,35 +322,21 @@ async function captureAndProcessScreenshot(sendResponse) {
 
     const responseData = await response.json();
 
-    // 5. Extract Solution
-    // The structure of the response needs to be carefully checked against the Gemini API documentation.
-    // Assuming the solution is in responseData.candidates[0].content.parts[0].text
+    // 4. Extract Solution (OpenAI-compatible response format)
     if (
-      responseData.candidates &&
-      responseData.candidates.length > 0 &&
-      responseData.candidates[0].content &&
-      responseData.candidates[0].content.parts &&
-      responseData.candidates[0].content.parts.length > 0 &&
-      responseData.candidates[0].content.parts[0].text
+      responseData.choices &&
+      responseData.choices.length > 0 &&
+      responseData.choices[0].message &&
+      responseData.choices[0].message.content
     ) {
-      const solutionText = responseData.candidates[0].content.parts[0].text;
+      const solutionText = responseData.choices[0].message.content;
       sendResponse({ solution: solutionText });
     } else {
       console.error("Unexpected API response structure:", responseData);
-      // Check for promptFeedback for blocked content
-      if (
-        responseData.promptFeedback &&
-        responseData.promptFeedback.blockReason
-      ) {
-        sendResponse({
-          error: `AI could not process the request. Reason: ${responseData.promptFeedback.blockReason}. It might be due to safety settings or an unclear image.`,
-        });
-      } else {
-        sendResponse({
-          error:
-            "Could not extract solution from AI response. The response structure might have changed or the content is missing.",
-        });
-      }
+      sendResponse({
+        error:
+          "Could not extract solution from AI response. The response structure might have changed or the content is missing.",
+      });
     }
   } catch (error) {
     console.error("Error in background script:", error);

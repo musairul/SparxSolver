@@ -312,10 +312,40 @@ pre.code-block code {
   display: none; /* Hidden by default */
 }
 
+#providerSelect {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 10px;
+  font-size: 1em;
+  box-sizing: border-box;
+}
+
+#apiKeyGroup {
+  display: none; /* Hidden until provider selected */
+}
+
 #apiKeyInput {
   width: calc(100% - 22px);
   margin-bottom: 10px;
   padding: 8px;
+}
+
+#fetchModelsButton {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+#modelGroup {
+  display: none; /* Hidden until models fetched */
+}
+
+#modelSelect {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 10px;
+  font-size: 1em;
+  box-sizing: border-box;
 }
 
 #saveApiKeyButton {

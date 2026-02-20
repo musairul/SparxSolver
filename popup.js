@@ -19,6 +19,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const toggleExplanationBtn = document.getElementById("toggleExplanationBtn");
   const explanationText = document.getElementById("explanationText");
   const tabHeader = document.getElementById("tabHeader");
+  const providerSelect = document.getElementById("providerSelect");
+  const apiKeyGroup = document.getElementById("apiKeyGroup");
+  const modelGroup = document.getElementById("modelGroup");
+  const modelSelect = document.getElementById("modelSelect");
+  const fetchModelsButton = document.getElementById("fetchModelsButton");
 
   function sendHeightToParent() {
     // Hide scrollbars on the iframe's content right before resizing starts
@@ -103,7 +108,37 @@ document.addEventListener("DOMContentLoaded", function () {
     bookworksTab.style.display = "none";
     solveTab.style.display = "block"; // Keep solve tab visible
     tabHeader.style.display = "flex"; // Keep tab header visible
-    sendHeightToParent();
+
+    // Pre-populate from storage
+    chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+      if (data.provider && providerSelect) {
+        providerSelect.value = data.provider;
+        apiKeyGroup.style.display = "block";
+      } else {
+        // Fresh state: reset dropdown and hide groups
+        if (providerSelect) providerSelect.value = "";
+        apiKeyGroup.style.display = "none";
+        modelGroup.style.display = "none";
+      }
+      if (data.apiKey && apiKeyInput) {
+        apiKeyInput.value = data.apiKey;
+      } else if (apiKeyInput) {
+        apiKeyInput.value = "";
+      }
+      if (data.model && data.provider && modelSelect) {
+        // Add the saved model as an option so it shows without re-fetching
+        modelSelect.innerHTML = "";
+        const opt = document.createElement("option");
+        opt.value = data.model;
+        opt.textContent = data.model;
+        opt.selected = true;
+        modelSelect.appendChild(opt);
+        modelGroup.style.display = "block";
+      } else {
+        modelGroup.style.display = "none";
+      }
+      sendHeightToParent();
+    });
   }
 
   function hideApiKeyScreen() {
@@ -122,17 +157,105 @@ document.addEventListener("DOMContentLoaded", function () {
     sendHeightToParent();
   }
 
+  // Provider dropdown change handler
+  if (providerSelect) {
+    providerSelect.addEventListener("change", () => {
+      if (providerSelect.value) {
+        apiKeyGroup.style.display = "block";
+        // Hide model group when provider changes (different provider = different models)
+        modelGroup.style.display = "none";
+        modelSelect.innerHTML =
+          '<option value="" disabled selected>Select a model...</option>';
+      } else {
+        apiKeyGroup.style.display = "none";
+        modelGroup.style.display = "none";
+      }
+      sendHeightToParent();
+    });
+  }
+
+  // Hide model group when API key changes (force re-fetch)
+  if (apiKeyInput) {
+    apiKeyInput.addEventListener("input", () => {
+      modelGroup.style.display = "none";
+      modelSelect.innerHTML =
+        '<option value="" disabled selected>Select a model...</option>';
+    });
+  }
+
+  // Fetch Models button handler
+  if (fetchModelsButton) {
+    fetchModelsButton.onclick = () => {
+      const provider = providerSelect.value;
+      const apiKey = apiKeyInput.value.trim();
+      if (!provider) {
+        alert("Please select a provider.");
+        return;
+      }
+      if (!apiKey) {
+        alert("Please enter an API key.");
+        return;
+      }
+      fetchModelsButton.textContent = "Fetching...";
+      fetchModelsButton.disabled = true;
+      chrome.runtime.sendMessage(
+        { action: "fetchModels", provider: provider, apiKey: apiKey },
+        (response) => {
+          fetchModelsButton.textContent = "Fetch Models";
+          fetchModelsButton.disabled = false;
+          if (response && response.error) {
+            alert("Failed to fetch models: " + response.error);
+            return;
+          }
+          if (response && response.models && response.models.length > 0) {
+            modelSelect.innerHTML = "";
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.disabled = true;
+            placeholder.selected = true;
+            placeholder.textContent = "Select a model...";
+            modelSelect.appendChild(placeholder);
+            response.models.forEach((modelId) => {
+              const opt = document.createElement("option");
+              opt.value = modelId;
+              opt.textContent = modelId;
+              modelSelect.appendChild(opt);
+            });
+            modelGroup.style.display = "block";
+            sendHeightToParent();
+          } else {
+            alert("No models found for this provider/key.");
+          }
+        }
+      );
+    };
+  }
+
+  // Save button handler - saves provider, API key, and model
   if (saveApiKeyButton && apiKeyInput) {
     saveApiKeyButton.onclick = () => {
+      const provider = providerSelect.value;
       const apiKey = apiKeyInput.value.trim();
-      if (apiKey) {
-        chrome.storage.local.set({ apiKey: apiKey }, () => {
-          console.log("[SparxSolver] API Key saved.");
-          hideApiKeyScreen();
-        });
-      } else {
-        alert("Please enter an API key.");
+      const model = modelSelect.value;
+      if (!provider) {
+        alert("Please select a provider.");
+        return;
       }
+      if (!apiKey) {
+        alert("Please enter an API key.");
+        return;
+      }
+      if (!model) {
+        alert("Please select a model.");
+        return;
+      }
+      chrome.storage.local.set(
+        { apiKey: apiKey, provider: provider, model: model },
+        () => {
+          console.log("[SparxSolver] Provider, API Key, and model saved.");
+          hideApiKeyScreen();
+        }
+      );
     };
   }
 
@@ -140,9 +263,9 @@ document.addEventListener("DOMContentLoaded", function () {
     changeApiKeyButton.onclick = showApiKeyScreen;
   }
 
-  // Check for API key on load
-  chrome.storage.local.get("apiKey", (data) => {
-    if (!data.apiKey) {
+  // Check for API key, provider, and model on load
+  chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+    if (!data.apiKey || !data.provider || !data.model) {
       // If on solve tab, show API key screen
       if (solveTabBtn.classList.contains("tab-active")) {
         showApiKeyScreen();
@@ -153,30 +276,21 @@ document.addEventListener("DOMContentLoaded", function () {
         changeApiKeyButton.style.display = "none";
       }
     } else {
-      // API key exists, normal setup
+      // All config exists, normal setup
       solveButton.style.display = "block";
       changeApiKeyButton.style.display = "block";
       if (solveTabBtn.classList.contains("tab-active")) {
         solveTab.style.display = "block";
         bookworksTab.style.display = "none";
       }
-      // No need to explicitly hide apiKeyScreen here as hideApiKeyScreen() or initial CSS handles it
-    }
-    // Adjust height after initial check - ensure correct elements are visible for height calc
-    if (apiKeyScreen.style.display === "block") {
-      // Height calculation specific to API screen shown
-    } else if (solveTab.style.display === "block") {
-      // Height calculation specific to solve tab shown
-    } else if (bookworksTab.style.display === "block") {
-      // Height calculation specific to bookworks tab shown
     }
     sendHeightToParent();
   });
 
   if (solveTabBtn && bookworksTabBtn && solveTab && bookworksTab) {
     solveTabBtn.onclick = function () {
-      chrome.storage.local.get("apiKey", (data) => {
-        if (!data.apiKey) {
+      chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+        if (!data.apiKey || !data.provider || !data.model) {
           showApiKeyScreen();
           resultContainer.style.display = "none"; // Ensure hidden if API key screen shown
         } else {
@@ -227,10 +341,10 @@ document.addEventListener("DOMContentLoaded", function () {
     };
   }
 
-  // Show Solve tab by default, and check API key status for it
+  // Show Solve tab by default, and check API key/provider/model status for it
   if (solveTab && bookworksTab && solveTabBtn && bookworksTabBtn) {
-    chrome.storage.local.get("apiKey", (data) => {
-      if (!data.apiKey) {
+    chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+      if (!data.apiKey || !data.provider || !data.model) {
         showApiKeyScreen();
       } else {
         hideApiKeyScreen();
@@ -362,8 +476,8 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   solveButton.addEventListener("click", () => {
-    chrome.storage.local.get("apiKey", (data) => {
-      if (!data.apiKey) {
+    chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+      if (!data.apiKey || !data.provider || !data.model) {
         showApiKeyScreen();
         return;
       }
