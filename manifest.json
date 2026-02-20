@@ -11,7 +11,8 @@
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*",
-    "*://*.sparx-learning.com/*"
+    "*://*.sparx-learning.com/*",
+    "https://sparxmaths.com/*"
   ],
   "action": {
     "default_icon": {
@@ -24,7 +25,8 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.sparx-learning.com/*"
+        "*://*.sparx-learning.com/*",
+        "*://*.sparxmaths.com/*"
       ],
       "js": [
         "libs/html2canvas.min.js",
@@ -51,7 +53,8 @@
         "systemprompt.txt"
       ],
       "matches": [
-        "*://*.sparx-learning.com/*"
+        "*://*.sparx-learning.com/*",
+        "*://*.sparxmaths.com/*"
       ]
     }
   ]
