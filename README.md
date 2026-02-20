@@ -1,13 +1,13 @@
 # 🧮 SparxSolver - AI Math Problem Solver
 
-A powerful Chrome extension that uses AI to solve Sparx Maths problems and store bookworks. This extension leverages Google's Gemini AI (Gemini) to provide detailed step-by-step solutions and explanations for mathematical problems.
+A powerful Chrome extension that uses AI to solve Sparx Maths problems and store bookworks. This extension leverages AI to provide detailed step-by-step solutions and explanations for mathematical problems.
 
 ## ✨ Features
 
-- **🤖 AI-Powered Math Solving**: Uses Google's Gemini AI to analyze and solve complex math problems
+- **🤖 AI-Powered Math Solving**: Uses AI to analyze and solve complex math problems
 - **📚 Saves Bookworks**: Save and organize solved problems for future reference
 - **🔍 Step-by-Step Solutions**: Get detailed explanations with mathematical reasoning
-- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 2.5 Flash to deliver fast and accurate responses.
+- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 2.5 Flash and gpt-oss-120b to deliver fast and accurate responses.
 - **🖼️ LaTeX Rendering**: Beautiful mathematical notation using KaTeX
 - **📸 Screenshot Analysis**: Automatically captures screenshots of math problems from Sparx Learning, even if the question is obscured (no need to zoom out!)
 
@@ -32,16 +32,70 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
    - Click the puzzle piece icon in Chrome toolbar
    - Pin "SparxSolver" for easy access
 
-5. **Get Your Free Google AI API Key**:
-   - Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
-      - You must be over 18 and in supported countries to visit this link (so if it doesnt work, try using a google account that is)
+5. **Get Your Free API Key From Any Of The Providers Below**:
+
+   <details>
+   <summary>🟢 Gemini</summary>
+
+   - Visit [Google AI Studio](https://aistudio.google.com/apikey)
+     - You must be over 18 and in a supported country to visit this link (so if it doesn't work, try using a Google account that is)
    - Click "Create API Key"
    - Copy the generated API key (keep it secure!)
+   - Uses Gemini 2.5 Flash Lite which is the best out of the providers
 
-6. **Paste API key into the extension**: 
+   </details>
+
+   <details>
+   <summary>🟠 OpenRouter</summary>
+
+   - Visit [OpenRouter](https://openrouter.ai/)
+   - Click "Sign Up" and create a free account (you can sign in with Google or GitHub)
+   - Once logged in, go to [API Keys](https://openrouter.ai/keys)
+   - Click "Create Key"
+   - Give it a name and click "Create"
+   - Copy the generated API key
+   - Uses any free model thats available - typically something like Deepseek.
+   </details>
+
+   <details>
+   <summary>🔵 Cerebras</summary>
+
+   - Visit [Cerebras Cloud](https://cloud.cerebras.ai/)
+   - Click "Sign Up" and create a free account
+   - Once logged in, navigate to "API Keys" in the dashboard
+   - Click "Create API Key"
+   - Copy the generated API key
+   - Uses gpt-oss-120b model and is blazingly fast
+   </details>
+
+   <details>
+   <summary>🟣 Mistral</summary>
+
+   - Visit [Mistral Console](https://console.mistral.ai/)
+   - Click "Sign Up" and create a free account
+   - Once logged in, go to "API Keys" in the left sidebar
+   - Click "Create new key"
+   - Copy the generated API key
+   - Uses mistral-medium-latest model which is a SOTA model
+
+   </details>
+
+   <details>
+   <summary>🟤 Groq</summary>
+
+   - Visit [GroqCloud Console](https://console.groq.com/)
+   - Click "Sign Up" and create a free account (you can sign in with Google or GitHub)
+   - Once logged in, go to [API Keys](https://console.groq.com/keys)
+   - Click "Create API Key"
+   - Give it a name and click "Submit"
+   - Copy the generated API key
+   - Uses gpt-oss-120b
+   </details>
+
+6. **Paste API key into the extension**:
    - Go to maths.sparx-learning.com (the extension only opens on this link!)
    - Click on the extension
-   - Enter your Google AI API key
+   - Select your provider from the dropdown and enter your API key
 
 ## 🐛 Troubleshooting
 
@@ -52,8 +106,8 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 - **"Manifest not found" error**:
     - You have likely selected the wrong folder. When you unzip the downloaded file, it might create a folder like `SparxSolver-main` and inside that, another `SparxSolver` folder. Make sure you select the inner `SparxSolver` folder that directly contains the `manifest.json` file.
 - **API Key not working**:
-    - Ensure you have copied the API key correctly from Google AI Studio.
-    - Verify that the API key is enabled and has the necessary permissions in your Google Cloud project (if applicable, though for basic MakerSuite keys this is usually handled automatically).
+    - Ensure you have copied the API key correctly.
+    - Verify that the API key is enabled and has the necessary permissions
     - Check if there are any restrictions on the API key (e.g., website restrictions) that might prevent it from working on `maths.sparx-learning.com`.
 - **Extension popup doesn't open**:
     - Make sure you are on the `maths.sparx-learning.com` website, as the extension is designed to activate only on this domain.
@@ -63,7 +117,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 
 - **Educational Use Only**: This extension is designed to help students understand mathematical concepts and problem-solving approaches. Please use responsibly and in accordance with your institution's academic integrity policies.
 
-- **Privacy**: Your API key and bookwork are stored locally in your browser. No data is sent to external servers except for AI processing through Google's Generative AI service.
+- **Privacy**: Your API key and bookwork are stored locally in your browser. No data is sent to external servers except for AI processing through the respective providers' servers
 
 ## 📞 Support, Bugs, Features
 
@@ -73,7 +127,6 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 
 ## 🙏 Acknowledgments
 
-- **Google AI**: For providing the Generative AI API
 - **KaTeX**: For beautiful mathematical rendering
 - **html2canvas**: For screenshot functionality
 ---

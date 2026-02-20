@@ -21,9 +21,14 @@ document.addEventListener("DOMContentLoaded", function () {
   const tabHeader = document.getElementById("tabHeader");
   const providerSelect = document.getElementById("providerSelect");
   const apiKeyGroup = document.getElementById("apiKeyGroup");
-  const modelGroup = document.getElementById("modelGroup");
-  const modelSelect = document.getElementById("modelSelect");
-  const fetchModelsButton = document.getElementById("fetchModelsButton");
+
+  const PROVIDER_MODELS = {
+    openrouter: "openrouter/free",
+    cerebras: "gpt-oss-120b",
+    gemini: "gemini-2.5-flash-lite",
+    mistral: "mistral-medium-latest",
+    groq: "openai/gpt-oss-120b",
+  };
 
   function sendHeightToParent() {
     // Hide scrollbars on the iframe's content right before resizing starts
@@ -110,32 +115,19 @@ document.addEventListener("DOMContentLoaded", function () {
     tabHeader.style.display = "flex"; // Keep tab header visible
 
     // Pre-populate from storage
-    chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
+    chrome.storage.local.get(["apiKey", "provider"], (data) => {
       if (data.provider && providerSelect) {
         providerSelect.value = data.provider;
         apiKeyGroup.style.display = "block";
       } else {
-        // Fresh state: reset dropdown and hide groups
+        // Fresh state: reset dropdown and hide group
         if (providerSelect) providerSelect.value = "";
         apiKeyGroup.style.display = "none";
-        modelGroup.style.display = "none";
       }
       if (data.apiKey && apiKeyInput) {
         apiKeyInput.value = data.apiKey;
       } else if (apiKeyInput) {
         apiKeyInput.value = "";
-      }
-      if (data.model && data.provider && modelSelect) {
-        // Add the saved model as an option so it shows without re-fetching
-        modelSelect.innerHTML = "";
-        const opt = document.createElement("option");
-        opt.value = data.model;
-        opt.textContent = data.model;
-        opt.selected = true;
-        modelSelect.appendChild(opt);
-        modelGroup.style.display = "block";
-      } else {
-        modelGroup.style.display = "none";
       }
       sendHeightToParent();
     });
@@ -160,83 +152,16 @@ document.addEventListener("DOMContentLoaded", function () {
   // Provider dropdown change handler
   if (providerSelect) {
     providerSelect.addEventListener("change", () => {
-      if (providerSelect.value) {
-        apiKeyGroup.style.display = "block";
-        // Hide model group when provider changes (different provider = different models)
-        modelGroup.style.display = "none";
-        modelSelect.innerHTML =
-          '<option value="" disabled selected>Select a model...</option>';
-      } else {
-        apiKeyGroup.style.display = "none";
-        modelGroup.style.display = "none";
-      }
+      apiKeyGroup.style.display = providerSelect.value ? "block" : "none";
       sendHeightToParent();
     });
   }
 
-  // Hide model group when API key changes (force re-fetch)
-  if (apiKeyInput) {
-    apiKeyInput.addEventListener("input", () => {
-      modelGroup.style.display = "none";
-      modelSelect.innerHTML =
-        '<option value="" disabled selected>Select a model...</option>';
-    });
-  }
-
-  // Fetch Models button handler
-  if (fetchModelsButton) {
-    fetchModelsButton.onclick = () => {
-      const provider = providerSelect.value;
-      const apiKey = apiKeyInput.value.trim();
-      if (!provider) {
-        alert("Please select a provider.");
-        return;
-      }
-      if (!apiKey) {
-        alert("Please enter an API key.");
-        return;
-      }
-      fetchModelsButton.textContent = "Fetching...";
-      fetchModelsButton.disabled = true;
-      chrome.runtime.sendMessage(
-        { action: "fetchModels", provider: provider, apiKey: apiKey },
-        (response) => {
-          fetchModelsButton.textContent = "Fetch Models";
-          fetchModelsButton.disabled = false;
-          if (response && response.error) {
-            alert("Failed to fetch models: " + response.error);
-            return;
-          }
-          if (response && response.models && response.models.length > 0) {
-            modelSelect.innerHTML = "";
-            const placeholder = document.createElement("option");
-            placeholder.value = "";
-            placeholder.disabled = true;
-            placeholder.selected = true;
-            placeholder.textContent = "Select a model...";
-            modelSelect.appendChild(placeholder);
-            response.models.forEach((modelId) => {
-              const opt = document.createElement("option");
-              opt.value = modelId;
-              opt.textContent = modelId;
-              modelSelect.appendChild(opt);
-            });
-            modelGroup.style.display = "block";
-            sendHeightToParent();
-          } else {
-            alert("No models found for this provider/key.");
-          }
-        }
-      );
-    };
-  }
-
-  // Save button handler - saves provider, API key, and model
+  // Save button handler - saves provider, API key, and hardcoded model
   if (saveApiKeyButton && apiKeyInput) {
     saveApiKeyButton.onclick = () => {
       const provider = providerSelect.value;
       const apiKey = apiKeyInput.value.trim();
-      const model = modelSelect.value;
       if (!provider) {
         alert("Please select a provider.");
         return;
@@ -245,14 +170,11 @@ document.addEventListener("DOMContentLoaded", function () {
         alert("Please enter an API key.");
         return;
       }
-      if (!model) {
-        alert("Please select a model.");
-        return;
-      }
+      const model = PROVIDER_MODELS[provider];
       chrome.storage.local.set(
         { apiKey: apiKey, provider: provider, model: model },
         () => {
-          console.log("[SparxSolver] Provider, API Key, and model saved.");
+          console.log("[SparxSolver] Provider, API Key, and model saved.", { provider, model });
           hideApiKeyScreen();
         }
       );

@@ -5,26 +5,27 @@ const PROVIDERS = {
   openrouter: {
     name: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
+    model: "openrouter/free",
   },
   cerebras: {
     name: "Cerebras",
     baseUrl: "https://api.cerebras.ai/v1",
+    model: "gpt-oss-120b",
   },
   gemini: {
     name: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-  },
-  openai: {
-    name: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
+    model: "gemini-2.5-flash-lite",
   },
   mistral: {
     name: "Mistral",
     baseUrl: "https://api.mistral.ai/v1",
+    model: "mistral-medium-latest",
   },
   groq: {
     name: "Groq",
     baseUrl: "https://api.groq.com/openai/v1",
+    model: "openai/gpt-oss-120b",
   },
 };
 
@@ -43,33 +44,6 @@ async function loadSystemPrompt() {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "solveMath") {
     captureAndProcessScreenshot(sendResponse);
-    return true;
-  }
-  if (request.action === "fetchModels") {
-    const provider = PROVIDERS[request.provider];
-    if (!provider) {
-      sendResponse({ error: "Unknown provider." });
-      return true;
-    }
-    fetch(`${provider.baseUrl}/models`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${request.apiKey}`,
-      },
-    })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`${res.status} ${res.statusText}`);
-        }
-        return res.json();
-      })
-      .then((data) => {
-        const models = (data.data || []).map((m) => m.id).sort();
-        sendResponse({ models: models });
-      })
-      .catch((err) => {
-        sendResponse({ error: err.message });
-      });
     return true;
   }
   if (request.action === "saveBookwork") {
