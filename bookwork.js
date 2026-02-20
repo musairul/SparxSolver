@@ -98,7 +98,7 @@ function screenshotQuestionDivWithDelay(bookworkCode) {
   blockContinueButton(true);
   setTimeout(() => {
     const questionDiv = document.querySelector(
-      "div[class*='_Question_'][class*='_5'][class*='_QuestionCentered_'][class*='_56'][class*='_QuestionAnswerOnly_'][class*='_61']"
+      "div[class*='AnswerScreen']"
     );
     if (!questionDiv) {
       console.log("Question div not found for screenshot.");
@@ -193,9 +193,9 @@ function logIfCorrectMessagePresent() {
     console.log("Correct!");
     // Find the bookwork code div
     let bookworkCode = null;
-    const bookworkDiv = document.querySelector(
-      "div._Chip_bu06u_1._Selected_bu06u_13._Boxy_bu06u_75._Filled_bu06u_8._md_bu06u_84"
-    );
+    const bookworkDiv = [...document.querySelectorAll("div")]
+      .filter((div) => div.textContent.includes("Bookwork code:"))
+      .pop();
     if (bookworkDiv) {
       const match = bookworkDiv.textContent.match(/Bookwork code: (.+)/);
       if (match) {

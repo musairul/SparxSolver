@@ -122,7 +122,7 @@ chrome.runtime.onConnect.addListener(function (port) {
           };
           // 2. Stream API Call
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent?alt=sse&key=${storedApiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${storedApiKey}`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -260,7 +260,7 @@ async function captureAndProcessScreenshot(sendResponse) {
     };
 
     // 4. Make API Call
-    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${storedApiKey}`;
+    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${storedApiKey}`;
     const response = await fetch(GEMINI_API_URL, {
       method: "POST",
       headers: {
