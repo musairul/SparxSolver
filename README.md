@@ -35,7 +35,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 5. **Get Your Free API Key From Any Of The Providers Below**:
 
    <details>
-   <summary>🟢 Gemini</summary>
+   <summary>🟢 Gemini (Recommended) </summary>
 
    - Visit [Google AI Studio](https://aistudio.google.com/apikey)
      - You must be over 18 and in a supported country to visit this link (so if it doesn't work, try using a Google account that is)
