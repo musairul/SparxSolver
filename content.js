@@ -10,6 +10,148 @@
 
   console.log("[SparxSolver] Content script loaded.");
 
+  // Function to find and display bookwork answer
+  function findAndDisplayBookworkAnswer() {
+    // Get all elements on the page (not just divs)
+    const allElements = Array.from(document.querySelectorAll("*"));
+
+    // Filter for innermost elements that contain "Bookwork" text
+    // (exclude parent elements that only contain "Bookwork" via child elements)
+    const bookworkElements = allElements.filter((element) => {
+      const text = element.textContent || "";
+      if (!text.includes("Bookwork")) return false;
+
+      // Check if any child element also contains "Bookwork"
+      const hasChildWithBookwork = Array.from(element.children).some((child) => {
+        return child.textContent && child.textContent.includes("Bookwork");
+      });
+
+      // Only return true if this element contains "Bookwork" but children don't
+      return !hasChildWithBookwork;
+    });
+
+    console.log(bookworkElements)
+
+    if (bookworkElements.length === 0) {
+      console.log("[SparxSolver] No element containing 'Bookwork' found on page.");
+      return;
+    }
+
+    console.log(
+      `[SparxSolver] Found ${bookworkElements.length} element(s) containing 'Bookwork'.`
+    );
+
+    // Find the "Bookwork check" element to exclude it
+    const bookworkCheckElement = bookworkElements.find((element) => {
+      const text = (element.textContent || "").trim();
+      return text.includes("Bookwork check");
+    });
+
+    console.log(bookworkCheckElement)
+
+    // Filter out the "Bookwork check" element to get the actual bookwork code element
+    const bookworkCodeElements = bookworkElements.filter((element) => element !== bookworkCheckElement);
+
+    if (bookworkCodeElements.length === 0) {
+      console.log(
+        "[SparxSolver] No bookwork code element found (only 'Bookwork check' present)."
+      );
+      return;
+    }
+
+    // Use the first matching bookwork code element (e.g., "Bookwork 5B")
+
+    const targetElement = bookworkCodeElements[0];
+    console.log(
+      "[SparxSolver] Target bookwork code element found. Text:",
+      targetElement.textContent
+    );
+    const fullText = (targetElement.textContent || "").trim();
+
+    console.log(
+      "[SparxSolver] Found target bookwork div. Text:",
+      fullText
+    );
+
+    // Extract bookwork code (e.g., "5B" from "Bookwork 5B")
+    const bookworkCode = fullText.replace("Bookwork", "").trim();
+
+    if (!bookworkCode) {
+      console.warn(
+        "[SparxSolver] Could not extract bookwork code from div text:",
+        fullText
+      );
+      return;
+    }
+
+    console.log("[SparxSolver] Extracted bookwork code:", bookworkCode);
+
+    chrome.storage.local.get("bookworks", (data) => {
+      if (chrome.runtime.lastError) {
+        console.error(
+          "[SparxSolver] Error retrieving bookworks from storage:",
+          chrome.runtime.lastError.message
+        );
+        return;
+      }
+
+      const bookworks = data.bookworks;
+      
+      if (!bookworks || !bookworks[bookworkCode]) {
+        console.log(
+          `[SparxSolver] No image URL found in storage for bookwork code: ${bookworkCode}.`
+        );
+        return;
+      }
+
+      const imageUrl = bookworks[bookworkCode];
+      console.log(`[SparxSolver] Found image URL for ${bookworkCode}.`);
+
+      const containerId = `sparx-bookwork-container-${bookworkCode}`;
+      if (document.getElementById(containerId)) {
+        console.log(
+          `[SparxSolver] Bookwork container for ${bookworkCode} already exists.`
+        );
+        return;
+      }
+
+      // Create the main container div
+      const imageContainerDiv = document.createElement("div");
+      imageContainerDiv.id = containerId;
+      imageContainerDiv.style.maxWidth = "600px";
+      imageContainerDiv.style.marginTop = "15px";
+      imageContainerDiv.style.marginBottom = "15px";
+      imageContainerDiv.style.padding = "10px";
+      imageContainerDiv.style.border = "5px solid #000000";
+      imageContainerDiv.style.backgroundColor = "#f9f9f9";
+
+      // Create the text element
+      const textElement = document.createElement("p");
+      textElement.textContent = "Correct Answer";
+      textElement.style.fontWeight = "bold";
+      textElement.style.marginBottom = "5px";
+
+      // Create the image element
+      const imgElement = document.createElement("img");
+      imgElement.src = imageUrl;
+      imgElement.alt = `Bookwork ${bookworkCode} Image`;
+      imgElement.style.display = "block";
+      imgElement.style.maxWidth = "100%";
+      imgElement.style.height = "auto";
+      imgElement.style.border = "1px solid #ccc";
+
+      // Append text and image to the container div
+      imageContainerDiv.appendChild(textElement);
+      imageContainerDiv.appendChild(imgElement);
+
+      // Insert the container div after the target bookwork element
+      targetElement.insertAdjacentElement("afterend", imageContainerDiv);
+      console.log(
+        `[SparxSolver] Bookwork container for ${bookworkCode} inserted after div.`
+      );
+    });
+  }
+
   const IFRAME_ID = "sparx-solver-iframe";
   const MAX_IFRAME_HEIGHT = 700; // Maximum height for the iframe in pixels
   let iframe = null;
@@ -67,96 +209,9 @@
           status: "Pointer events enabled with !important after delay",
         });
 
-        // ---- NEW BOOKWORK LOGIC ----
-        const bookworkDivSelector =
-          "div._Chip_bu06u_1._Selected_bu06u_13._Boxy_bu06u_75._Filled_bu06u_8._md_bu06u_84._Bookwork_1cxo7_33";
-        const targetDiv = document.querySelector(bookworkDivSelector);
-
-        if (targetDiv) {
-          console.log(
-            "[SparxSolver] Found target bookwork div. Text:",
-            targetDiv.textContent
-          );
-          const fullText = targetDiv.textContent || "";
-          const bookworkCode = fullText.replace("Bookwork ", "").trim();
-
-          if (bookworkCode) {
-            console.log("[SparxSolver] Extracted bookwork code:", bookworkCode);
-            chrome.storage.local.get("bookworks", (data) => {
-              if (chrome.runtime.lastError) {
-                console.error(
-                  "[SparxSolver] Error retrieving bookworks from storage:",
-                  chrome.runtime.lastError.message
-                );
-                return;
-              }
-
-              const bookworks = data.bookworks;
-              if (bookworks && bookworks[bookworkCode]) {
-                const imageUrl = bookworks[bookworkCode];
-                console.log(
-                  `[SparxSolver] Found image URL for ${bookworkCode}.`
-                );
-
-                const containerId = `sparx-bookwork-container-${bookworkCode}`;
-                if (document.getElementById(containerId)) {
-                  console.log(
-                    `[SparxSolver] Bookwork container for ${bookworkCode} already exists.`
-                  );
-                  return;
-                }
-
-                // Create the main container div
-                const imageContainerDiv = document.createElement("div");
-                imageContainerDiv.id = containerId;
-                imageContainerDiv.style.maxWidth = "600px"; // Apply max-width to the container
-                imageContainerDiv.style.marginTop = "15px";
-                imageContainerDiv.style.marginBottom = "15px"; // Added bottom margin
-                imageContainerDiv.style.padding = "10px";
-                imageContainerDiv.style.border = "5px solid #000000";
-                imageContainerDiv.style.backgroundColor = "#f9f9f9";
-
-                // Create the text element
-                const textElement = document.createElement("p");
-                textElement.textContent = "Found bookwork answer:";
-                textElement.style.fontWeight = "bold";
-                textElement.style.marginBottom = "5px";
-
-                // Create the image element
-                const imgElement = document.createElement("img");
-                // imgElement.id = `sparx-bookwork-image-${bookworkCode}`; // ID for image itself is optional if container is unique
-                imgElement.src = imageUrl;
-                imgElement.alt = `Bookwork ${bookworkCode} Image`;
-                imgElement.style.display = "block";
-                imgElement.style.maxWidth = "100%"; // Image scales within its container
-                imgElement.style.height = "auto";
-                imgElement.style.border = "1px solid #ccc";
-
-                // Append text and image to the container div
-                imageContainerDiv.appendChild(textElement);
-                imageContainerDiv.appendChild(imgElement);
-
-                // Insert the container div after the target bookwork div
-                targetDiv.insertAdjacentElement("afterend", imageContainerDiv);
-                console.log(
-                  `[SparxSolver] Bookwork container for ${bookworkCode} inserted after div.`
-                );
-              } else {
-                console.log(
-                  `[SparxSolver] No image URL found in storage for bookwork code: ${bookworkCode}.`
-                );
-              }
-            });
-          } else {
-            console.warn(
-              "[SparxSolver] Could not extract bookwork code from div text:",
-              fullText
-            );
-          }
-        } else {
-          // console.log("[SparxSolver] Target bookwork div not found on page."); // Optional: uncomment for debugging
-        }
-        // ---- END NEW BOOKWORK LOGIC ----
+        // ---- BOOKWORK CHECK LOGIC ----
+        findAndDisplayBookworkAnswer();
+        // ---- END BOOKWORK CHECK LOGIC ----
       }, 2000); // Current delay
     }
     return true; // Keep the message channel open for async response
