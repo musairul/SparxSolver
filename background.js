@@ -7,11 +7,6 @@ const PROVIDERS = {
     baseUrl: "https://openrouter.ai/api/v1",
     model: "openrouter/free",
   },
-  cerebras: {
-    name: "Cerebras",
-    baseUrl: "https://api.cerebras.ai/v1",
-    model: "gpt-oss-120b",
-  },
   gemini: {
     name: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -21,11 +16,6 @@ const PROVIDERS = {
     name: "Mistral",
     baseUrl: "https://api.mistral.ai/v1",
     model: "mistral-medium-latest",
-  },
-  groq: {
-    name: "Groq",
-    baseUrl: "https://api.groq.com/openai/v1",
-    model: "openai/gpt-oss-120b",
   },
 };
 
@@ -79,9 +69,14 @@ chrome.runtime.onConnect.addListener(function (port) {
           );
 
           if (!storedApiKey || !storedProvider || !storedModel) {
+            let missingFields = [];
+            if (!storedProvider) missingFields.push("Provider");
+            if (!storedApiKey) missingFields.push("API Key");
+            if (!storedModel) missingFields.push("Model");
+
             port.postMessage({
               error:
-                "Provider, API Key, or model not configured. Please set them in the extension popup.",
+                `Missing configuration: ${missingFields.join(", ")}. Please set them in the extension popup before solving problems.`,
             });
             port.disconnect();
             return;
@@ -89,7 +84,10 @@ chrome.runtime.onConnect.addListener(function (port) {
 
           const providerConfig = PROVIDERS[storedProvider];
           if (!providerConfig) {
-            port.postMessage({ error: "Unknown provider." });
+            const availableProviders = Object.keys(PROVIDERS).join(", ");
+            port.postMessage({
+              error: `Unknown provider "${storedProvider}". Available providers: ${availableProviders}. Please select a valid provider in the extension settings.`,
+            });
             port.disconnect();
             return;
           }
@@ -100,7 +98,9 @@ chrome.runtime.onConnect.addListener(function (port) {
             currentWindow: true,
           });
           if (!tab || !tab.id) {
-            port.postMessage({ error: "No active tab found." });
+            port.postMessage({
+              error: "No active tab found. Please open a Sparx Learning page and make sure the extension has access to it.",
+            });
             port.disconnect();
             return;
           }
@@ -115,7 +115,7 @@ chrome.runtime.onConnect.addListener(function (port) {
             port.postMessage({
               error:
                 dataUrlResponse?.error ||
-                "Failed to capture question screenshot.",
+                "Failed to capture screenshot of the question. This may happen if: 1) The content script is not loaded, 2) You're on an unsupported page, or 3) The question element is not visible. Please refresh the page and try again.",
             });
             port.disconnect();
             return;
@@ -157,8 +157,21 @@ chrome.runtime.onConnect.addListener(function (port) {
             }
           );
           if (!response.ok || !response.body) {
+            let errorDetails = "";
+            if (response.status === 401 || response.status === 403) {
+              errorDetails = `Authentication failed. Your API key for ${PROVIDERS[storedProvider]?.name} is invalid or expired. Please update it in the extension settings.`;
+            } else if (response.status === 429) {
+              errorDetails = `Rate limit exceeded. ${PROVIDERS[storedProvider]?.name} is throttling requests. Please wait a moment and try again.`;
+            } else if (response.status >= 500) {
+              errorDetails = `${PROVIDERS[storedProvider]?.name} server error (${response.status}). The service may be temporarily unavailable. Please try again later.`;
+            } else if (!response.body) {
+              errorDetails = `API request failed: No response body received from ${PROVIDERS[storedProvider]?.name}.`;
+            } else {
+              errorDetails = `API request failed: ${response.status} ${response.statusText} from ${PROVIDERS[storedProvider]?.name}.`;
+            }
+
             port.postMessage({
-              error: `API request failed: ${response.status} ${response.statusText}`,
+              error: errorDetails,
             });
             port.disconnect();
             return;
@@ -202,8 +215,18 @@ chrome.runtime.onConnect.addListener(function (port) {
           port.postMessage({ done: true });
           port.disconnect();
         } catch (error) {
+          let errorMessage = error.message || "Unknown error";
+
+          if (error.message?.includes("Failed to fetch")) {
+            errorMessage = `Network error: Unable to reach ${PROVIDERS[storedProvider]?.name}. Check your internet connection and firewall settings.`;
+          } else if (error.message?.includes("timeout")) {
+            errorMessage = `Request timeout: ${PROVIDERS[storedProvider]?.name} took too long to respond. Please try again.`;
+          } else if (error.message?.includes("JSON")) {
+            errorMessage = `Invalid response from ${PROVIDERS[storedProvider]?.name}: Could not parse response format. The provider may have changed their API.`;
+          }
+
           port.postMessage({
-            error: `An unexpected error occurred: ${error.message}`,
+            error: `Error solving problem: ${errorMessage}. If this persists, please check the extension settings and try refreshing the page.`,
           });
           port.disconnect();
         }
@@ -224,16 +247,24 @@ async function captureAndProcessScreenshot(sendResponse) {
     );
 
     if (!storedApiKey || !storedProvider || !storedModel) {
+      let missingFields = [];
+      if (!storedProvider) missingFields.push("Provider");
+      if (!storedApiKey) missingFields.push("API Key");
+      if (!storedModel) missingFields.push("Model");
+
       sendResponse({
         error:
-          "Provider, API Key, or model not configured. Please set them in the extension popup.",
+          `Missing configuration: ${missingFields.join(", ")}. Please set them in the extension popup before solving problems.`,
       });
       return;
     }
 
     const providerConfig = PROVIDERS[storedProvider];
     if (!providerConfig) {
-      sendResponse({ error: "Unknown provider." });
+      const availableProviders = Object.keys(PROVIDERS).join(", ");
+      sendResponse({
+        error: `Unknown provider "${storedProvider}". Available providers: ${availableProviders}. Please select a valid provider in the extension settings.`,
+      });
       return;
     }
 
@@ -242,7 +273,9 @@ async function captureAndProcessScreenshot(sendResponse) {
       format: "png",
     });
     if (!dataUrl) {
-      sendResponse({ error: "Failed to capture screenshot." });
+      sendResponse({
+        error: "Failed to capture screenshot of the page. This may happen if: 1) You're on an unsupported page, 2) The page is not fully loaded, or 3) The browser is not allowing screenshots. Please refresh the page and try again.",
+      });
       return;
     }
     const base64ImageData = dataUrl.split(",")[1];
@@ -284,12 +317,31 @@ async function captureAndProcessScreenshot(sendResponse) {
     );
 
     if (!response.ok) {
-      const errorBody = await response.json();
-      console.error("API Error Response:", errorBody);
+      let errorDetails = "";
+      let errorBody = null;
+
+      try {
+        errorBody = await response.json();
+      } catch (e) {
+        // Response body is not JSON
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        errorDetails = `Authentication failed. Your API key for ${providerConfig.name} is invalid or expired. Please update it in the extension settings.`;
+      } else if (response.status === 429) {
+        errorDetails = `Rate limit exceeded. ${providerConfig.name} is throttling requests. Please wait a moment and try again.`;
+      } else if (response.status >= 500) {
+        errorDetails = `${providerConfig.name} server error (${response.status}). The service may be temporarily unavailable. Please try again later.`;
+      } else {
+        errorDetails = `API request failed: ${response.status} ${response.statusText} from ${providerConfig.name}.`;
+        if (errorBody?.error?.message) {
+          errorDetails += ` Details: ${errorBody.error.message}`;
+        }
+      }
+
+      console.error("API Error Response:", errorBody || response);
       sendResponse({
-        error: `API request failed: ${response.status} ${
-          response.statusText
-        }. ${errorBody?.error?.message || "Check console for details."}`,
+        error: errorDetails,
       });
       return;
     }
@@ -314,7 +366,22 @@ async function captureAndProcessScreenshot(sendResponse) {
     }
   } catch (error) {
     console.error("Error in background script:", error);
-    sendResponse({ error: `An unexpected error occurred: ${error.message}` });
+
+    let errorMessage = error.message || "Unknown error";
+
+    if (error.message?.includes("Failed to fetch")) {
+      errorMessage = `Network error: Unable to reach ${providerConfig?.name || "the provider"}. Check your internet connection and firewall settings.`;
+    } else if (error.message?.includes("timeout")) {
+      errorMessage = `Request timeout: ${providerConfig?.name || "The provider"} took too long to respond. Please try again.`;
+    } else if (error.message?.includes("JSON")) {
+      errorMessage = `Invalid response from ${providerConfig?.name || "the provider"}: Could not parse response format. The provider may have changed their API.`;
+    } else if (error.message?.includes("Cannot read")) {
+      errorMessage = `Response parsing error: The provider returned an unexpected response format. Please try again.`;
+    }
+
+    sendResponse({
+      error: `Error solving problem: ${errorMessage}. If this persists, please check the extension settings and try refreshing the page.`,
+    });
   }
 }
 

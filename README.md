@@ -58,17 +58,6 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
    </details>
 
    <details>
-   <summary>🔵 Cerebras</summary>
-
-   - Visit [Cerebras Cloud](https://cloud.cerebras.ai/)
-   - Click "Sign Up" and create a free account
-   - Once logged in, navigate to "API Keys" in the dashboard
-   - Click "Create API Key"
-   - Copy the generated API key
-   - Uses gpt-oss-120b model and is blazingly fast
-   </details>
-
-   <details>
    <summary>🟣 Mistral</summary>
 
    - Visit [Mistral Console](https://console.mistral.ai/)
@@ -80,17 +69,11 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 
    </details>
 
-   <details>
-   <summary>🟤 Groq</summary>
+   The free tier of these LLMs typically have a limit on number of requests per day, so I would recommend using all 3 and whenever one runs out just switch to another.
 
-   - Visit [GroqCloud Console](https://console.groq.com/)
-   - Click "Sign Up" and create a free account (you can sign in with Google or GitHub)
-   - Once logged in, go to [API Keys](https://console.groq.com/keys)
-   - Click "Create API Key"
-   - Give it a name and click "Submit"
-   - Copy the generated API key
-   - Uses gpt-oss-120b
-   </details>
+   Ive also noticed the LLMs work best on questions that dont have diagrams
+
+   If there are any other LLMs with free tiers for their API that support image input, let me know and I will try to add it to the extension. 
 
 6. **Paste API key into the extension**:
    - Go to maths.sparx-learning.com (the extension only opens on this link!)

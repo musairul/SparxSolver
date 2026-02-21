@@ -24,10 +24,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   const PROVIDER_MODELS = {
     openrouter: "openrouter/free",
-    cerebras: "gpt-oss-120b",
     gemini: "gemini-2.5-flash-lite",
     mistral: "mistral-medium-latest",
-    groq: "openai/gpt-oss-120b",
   };
 
   function sendHeightToParent() {
@@ -114,19 +112,18 @@ document.addEventListener("DOMContentLoaded", function () {
     solveTab.style.display = "block"; // Keep solve tab visible
     tabHeader.style.display = "flex"; // Keep tab header visible
 
-    // Pre-populate from storage
-    chrome.storage.local.get(["apiKey", "provider"], (data) => {
+    // Pre-populate from storage with per-provider key
+    chrome.storage.local.get(["provider", "providerApiKeys"], (data) => {
       if (data.provider && providerSelect) {
         providerSelect.value = data.provider;
         apiKeyGroup.style.display = "block";
+        // Load the key for this specific provider
+        const keys = data.providerApiKeys || {};
+        apiKeyInput.value = keys[data.provider] || "";
       } else {
         // Fresh state: reset dropdown and hide group
         if (providerSelect) providerSelect.value = "";
         apiKeyGroup.style.display = "none";
-      }
-      if (data.apiKey && apiKeyInput) {
-        apiKeyInput.value = data.apiKey;
-      } else if (apiKeyInput) {
         apiKeyInput.value = "";
       }
       sendHeightToParent();
@@ -149,10 +146,18 @@ document.addEventListener("DOMContentLoaded", function () {
     sendHeightToParent();
   }
 
-  // Provider dropdown change handler
+  // Provider dropdown change handler - load saved key for selected provider
   if (providerSelect) {
     providerSelect.addEventListener("change", () => {
       apiKeyGroup.style.display = providerSelect.value ? "block" : "none";
+      if (providerSelect.value) {
+        chrome.storage.local.get("providerApiKeys", (data) => {
+          const keys = data.providerApiKeys || {};
+          apiKeyInput.value = keys[providerSelect.value] || "";
+        });
+      } else {
+        apiKeyInput.value = "";
+      }
       sendHeightToParent();
     });
   }
@@ -171,13 +176,18 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
       const model = PROVIDER_MODELS[provider];
-      chrome.storage.local.set(
-        { apiKey: apiKey, provider: provider, model: model },
-        () => {
-          console.log("[SparxSolver] Provider, API Key, and model saved.", { provider, model });
-          hideApiKeyScreen();
-        }
-      );
+      // Store key per-provider so each provider remembers its own key
+      chrome.storage.local.get("providerApiKeys", (data) => {
+        const keys = data.providerApiKeys || {};
+        keys[provider] = apiKey;
+        chrome.storage.local.set(
+          { apiKey: apiKey, provider: provider, model: model, providerApiKeys: keys },
+          () => {
+            console.log("[SparxSolver] Provider, API Key, and model saved.", { provider, model });
+            hideApiKeyScreen();
+          }
+        );
+      });
     };
   }
 
