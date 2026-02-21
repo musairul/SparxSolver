@@ -40,7 +40,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
    - Visit [Google AI Studio](https://aistudio.google.com/apikey)
      - You must be over 18 and in a supported country to visit this link (so if it doesn't work, try using a Google account that is)
    - Click "Create API Key"
-   - Copy the generated API key (keep it secure!)
+   - Copy the generated API key
    - Uses Gemini 2.5 Flash Lite which is the best out of the providers
 
    </details>
