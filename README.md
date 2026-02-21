@@ -7,7 +7,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 - **🤖 AI-Powered Math Solving**: Uses AI to analyze and solve complex math problems
 - **📚 Saves Bookworks**: Save and organize solved problems for future reference
 - **🔍 Step-by-Step Solutions**: Get detailed explanations with mathematical reasoning
-- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 2.5 Flash and gpt-oss-120b to deliver fast and accurate responses.
+- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 2.5 Flash and Mistral Medium to deliver fast and accurate responses.
 - **🖼️ LaTeX Rendering**: Beautiful mathematical notation using KaTeX
 - **📸 Screenshot Analysis**: Automatically captures screenshots of math problems from Sparx Learning, even if the question is obscured (no need to zoom out!)
 
