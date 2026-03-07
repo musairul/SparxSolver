@@ -5,17 +5,21 @@ const PROVIDERS = {
   openrouter: {
     name: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
-    model: "openrouter/free",
+    models: ["openrouter/free"],
   },
   gemini: {
     name: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: "gemini-2.5-flash-lite",
+    models: [
+      "gemini-3.1-flash-lite-preview",
+      "gemini-2.5-flash-lite",
+      "gemma-3-27b-it"
+    ],
   },
   mistral: {
     name: "Mistral",
     baseUrl: "https://api.mistral.ai/v1",
-    model: "mistral-medium-latest",
+    models: ["mistral-medium-latest"],
   },
 };
 
@@ -68,11 +72,11 @@ chrome.runtime.onConnect.addListener(function (port) {
             )
           );
 
-          if (!storedApiKey || !storedProvider || !storedModel) {
+          if (!storedApiKey || !storedProvider || (!storedModel && !PROVIDERS[storedProvider]?.models)) {
             let missingFields = [];
             if (!storedProvider) missingFields.push("Provider");
             if (!storedApiKey) missingFields.push("API Key");
-            if (!storedModel) missingFields.push("Model");
+            if (!storedModel && !PROVIDERS[storedProvider]?.models) missingFields.push("Model");
 
             port.postMessage({
               error:
@@ -124,50 +128,82 @@ chrome.runtime.onConnect.addListener(function (port) {
           const base64ImageData = dataUrl.split(",")[1];
 
           const detailedPrompt = await loadSystemPrompt();
-          const requestBody = {
-            model: storedModel,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: detailedPrompt },
-                  {
-                    type: "image_url",
-                    image_url: {
-                      url: `data:image/png;base64,${base64ImageData}`,
+
+          let modelsToTry = providerConfig.models && providerConfig.models.length > 0
+            ? providerConfig.models
+            : [storedModel];
+
+          let response = null;
+          let fetchError = null;
+
+          for (const modelToTry of modelsToTry) {
+            const requestBody = {
+              model: modelToTry,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: detailedPrompt },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: `data:image/png;base64,${base64ImageData}`,
+                      },
                     },
+                  ],
+                },
+              ],
+              stream: true,
+              max_tokens: 60000,
+              temperature: 0.3,
+            };
+
+            try {
+              // 2. Stream API Call (OpenAI-compatible format)
+              const res = await fetch(
+                `${providerConfig.baseUrl}/chat/completions`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${storedApiKey}`,
                   },
-                ],
-              },
-            ],
-            stream: true,
-            max_tokens: 4096,
-            temperature: 0.3,
-          };
-          // 2. Stream API Call (OpenAI-compatible format)
-          const response = await fetch(
-            `${providerConfig.baseUrl}/chat/completions`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${storedApiKey}`,
-              },
-              body: JSON.stringify(requestBody),
+                  body: JSON.stringify(requestBody),
+                }
+              );
+
+              if (res.ok && res.body) {
+                response = res;
+                break; // Success, exit the loop
+              } else {
+                response = res; // Keep the last failed response for error handling
+                console.warn(`[SparxSolver] Model ${modelToTry} failed with status ${res.status}. Falling back if available...`);
+              }
+            } catch (err) {
+              fetchError = err;
+              console.warn(`[SparxSolver] Model ${modelToTry} fetch error:`, err);
             }
-          );
-          if (!response.ok || !response.body) {
+          }
+
+          if (fetchError && !response) {
+            throw fetchError;
+          }
+
+          if (!response || !response.ok || !response.body) {
             let errorDetails = "";
-            if (response.status === 401 || response.status === 403) {
+            let status = response ? response.status : 0;
+            let statusText = response ? response.statusText : "";
+
+            if (status === 401 || status === 403) {
               errorDetails = `Authentication failed. Your API key for ${PROVIDERS[storedProvider]?.name} is invalid or expired. Please update it in the extension settings.`;
-            } else if (response.status === 429) {
+            } else if (status === 429) {
               errorDetails = `Rate limit exceeded. ${PROVIDERS[storedProvider]?.name} is throttling requests. Please wait a moment and try again.`;
-            } else if (response.status >= 500) {
-              errorDetails = `${PROVIDERS[storedProvider]?.name} server error (${response.status}). The service may be temporarily unavailable. Please try again later.`;
-            } else if (!response.body) {
+            } else if (status >= 500) {
+              errorDetails = `${PROVIDERS[storedProvider]?.name} server error (${status}). The service may be temporarily unavailable. Please try again later.`;
+            } else if (response && !response.body) {
               errorDetails = `API request failed: No response body received from ${PROVIDERS[storedProvider]?.name}.`;
             } else {
-              errorDetails = `API request failed: ${response.status} ${response.statusText} from ${PROVIDERS[storedProvider]?.name}.`;
+              errorDetails = `API request failed: ${status} ${statusText} from ${PROVIDERS[storedProvider]?.name}.`;
             }
 
             port.postMessage({
@@ -246,11 +282,11 @@ async function captureAndProcessScreenshot(sendResponse) {
       chrome.storage.local.get(["apiKey", "provider", "model"], resolve)
     );
 
-    if (!storedApiKey || !storedProvider || !storedModel) {
+    if (!storedApiKey || !storedProvider || (!storedModel && !PROVIDERS[storedProvider]?.models)) {
       let missingFields = [];
       if (!storedProvider) missingFields.push("Provider");
       if (!storedApiKey) missingFields.push("API Key");
-      if (!storedModel) missingFields.push("Model");
+      if (!storedModel && !PROVIDERS[storedProvider]?.models) missingFields.push("Model");
 
       sendResponse({
         error:
@@ -282,61 +318,93 @@ async function captureAndProcessScreenshot(sendResponse) {
 
     const detailedPrompt = await loadSystemPrompt();
 
-    // 2. Construct API Request (OpenAI-compatible format)
-    const requestBody = {
-      model: storedModel,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: detailedPrompt },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${base64ImageData}`,
+    let modelsToTry = providerConfig.models && providerConfig.models.length > 0
+      ? providerConfig.models
+      : [storedModel];
+
+    let response = null;
+    let fetchError = null;
+
+    for (const modelToTry of modelsToTry) {
+      // 2. Construct API Request (OpenAI-compatible format)
+      const requestBody = {
+        model: modelToTry,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: detailedPrompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${base64ImageData}`,
+                },
               },
+            ],
+          },
+        ],
+        max_tokens: 60000,
+        temperature: 0.3,
+      };
+
+      try {
+        // 3. Make API Call
+        const res = await fetch(
+          `${providerConfig.baseUrl}/chat/completions`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${storedApiKey}`,
             },
-          ],
-        },
-      ],
-      max_tokens: 4096,
-      temperature: 0.3,
-    };
+            body: JSON.stringify(requestBody),
+          }
+        );
 
-    // 3. Make API Call
-    const response = await fetch(
-      `${providerConfig.baseUrl}/chat/completions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${storedApiKey}`,
-        },
-        body: JSON.stringify(requestBody),
+        if (res.ok) {
+          response = res;
+          break; // Success
+        } else {
+          response = res;
+          console.warn(`[SparxSolver] Model ${modelToTry} failed with status ${res.status}. Falling back...`);
+        }
+      } catch (err) {
+        fetchError = err;
+        console.warn(`[SparxSolver] Model ${modelToTry} fetch error:`, err);
       }
-    );
+    }
 
-    if (!response.ok) {
+    if (fetchError && !response) {
+      throw fetchError;
+    }
+
+    if (!response || !response.ok) {
       let errorDetails = "";
       let errorBody = null;
 
-      try {
-        errorBody = await response.json();
-      } catch (e) {
-        // Response body is not JSON
-      }
-
-      if (response.status === 401 || response.status === 403) {
-        errorDetails = `Authentication failed. Your API key for ${providerConfig.name} is invalid or expired. Please update it in the extension settings.`;
-      } else if (response.status === 429) {
-        errorDetails = `Rate limit exceeded. ${providerConfig.name} is throttling requests. Please wait a moment and try again.`;
-      } else if (response.status >= 500) {
-        errorDetails = `${providerConfig.name} server error (${response.status}). The service may be temporarily unavailable. Please try again later.`;
-      } else {
-        errorDetails = `API request failed: ${response.status} ${response.statusText} from ${providerConfig.name}.`;
-        if (errorBody?.error?.message) {
-          errorDetails += ` Details: ${errorBody.error.message}`;
+      if (response) {
+        try {
+          errorBody = await response.json();
+        } catch (e) {
+          // Response body is not JSON
         }
+
+        let status = response.status;
+        let statusText = response.statusText;
+        if (status === 401 || status === 403) {
+          errorDetails = `Authentication failed. Your API key for ${providerConfig.name} is invalid or expired. Please update it in the extension settings.`;
+        } else if (status === 429) {
+          errorDetails = `Rate limit exceeded. ${providerConfig.name} is throttling requests. Please wait a moment and try again.`;
+        } else if (status >= 500) {
+          errorDetails = `${providerConfig.name} server error (${status}). The service may be temporarily unavailable. Please try again later.`;
+        } else {
+          errorDetails = `API request failed: ${status} ${statusText} from ${providerConfig.name}.`;
+          if (errorBody?.error?.message) {
+            errorDetails += ` Details: ${errorBody.error.message}`;
+          }
+        }
+      } else {
+        errorDetails = `API request failed.`;
       }
 
       console.error("API Error Response:", errorBody || response);
@@ -434,8 +502,7 @@ async function checkUrlForWac(tabId, url) {
           if (chrome.runtime.lastError) {
             const errorMessage = chrome.runtime.lastError.message;
             console.warn(
-              `[SparxSolver] ${
-                isRetry ? "Retry " : ""
+              `[SparxSolver] ${isRetry ? "Retry " : ""
               }Send "enablePointerEvents" failed:`,
               errorMessage
             );
@@ -470,8 +537,7 @@ async function checkUrlForWac(tabId, url) {
             }
           } else {
             console.log(
-              `[SparxSolver] Sent "enablePointerEvents" message ${
-                isRetry ? "on retry " : ""
+              `[SparxSolver] Sent "enablePointerEvents" message ${isRetry ? "on retry " : ""
               }successfully, response:`,
               response
             );
