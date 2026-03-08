@@ -12,7 +12,13 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 - **📸 Screenshot Analysis**: Automatically captures screenshots of math problems from Sparx Learning, even if the question is obscured (no need to zoom out!)
 
 ![SparxSolver solving a maths question](<sparxsolverdemo.png>)
+_SparxSolver solves any maths problem_
 
+![SparxSolver saving bookworks](<bookworks.png>)
+_SparxSolver saves your bookworks_
+
+![SparxSolver solving bookwork checks](<bookworkcheck.png>)
+_SparxSolver completes bookwork checks_
 ## 🛠️ Installation & Setup
 
 1. **Download the Extension**:
@@ -35,13 +41,14 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
 5. **Get Your Free API Key From Any Of The Providers Below**:
 
    <details>
-   <summary>🟢 Gemini (Recommended) </summary>
+   <summary>🟢 Gemini (Highly Recommended!) </summary>
 
    - Visit [Google AI Studio](https://aistudio.google.com/apikey)
      - You must be over 18 and in a supported country to visit this link (so if it doesn't work, try using a Google account that is)
    - Click "Create API Key"
    - Copy the generated API key
-   - Uses Gemini 2.5 Flash Lite which is the best out of the providers
+   - Uses Gemini 3.1 Flash Lite Preview which is the best out of the providers
+   - If Gemini 3.1 runs out, it switches to 2.5, and then to Gemma 3
 
    </details>
 
@@ -54,7 +61,7 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
    - Click "Create Key"
    - Give it a name and click "Create"
    - Copy the generated API key
-   - Uses any free model thats available - typically something like Deepseek.
+   - Uses any free model thats available - typically something like Deepseek. Not as good as Gemini.
    </details>
 
    <details>
@@ -65,15 +72,9 @@ A powerful Chrome extension that uses AI to solve Sparx Maths problems and store
    - Once logged in, go to "API Keys" in the left sidebar
    - Click "Create new key"
    - Copy the generated API key
-   - Uses mistral-medium-latest model which is a SOTA model
+   - Uses mistral-medium-latest model which is kind of trash. Not as good as gemini.
 
-   </details>
-
-   The free tier of these LLMs typically have a limit on number of requests per day, so I would recommend using all 3 and whenever one runs out just switch to another.
-
-   Ive also noticed the LLMs work best on questions that dont have diagrams
-
-   If there are any other LLMs with free tiers for their API that support image input, let me know and I will try to add it to the extension. 
+   </details> 
 
 6. **Paste API key into the extension**:
    - Go to maths.sparx-learning.com (the extension only opens on this link!)

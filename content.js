@@ -122,7 +122,7 @@
       imageContainerDiv.style.marginTop = "15px";
       imageContainerDiv.style.marginBottom = "15px";
       imageContainerDiv.style.padding = "10px";
-      imageContainerDiv.style.border = "5px solid #000000";
+      imageContainerDiv.style.border = "5px solid #ff0000";
       imageContainerDiv.style.backgroundColor = "#f9f9f9";
 
       // Create the text element
