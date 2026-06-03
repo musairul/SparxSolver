@@ -250,7 +250,9 @@
     if (request.action === "captureQuestionScreenshot") {
       // Dynamically load html2canvas if not present
       function doScreenshot() {
-        const questionEl = document.querySelector("._QuestionWrapper_ypayp_46");
+  const questionEl =
+          document.querySelector('[class*="QuestionWrapper"]') ||
+          document.querySelector('[class^="_Question_"]');
         if (!questionEl) {
           sendResponse({ error: "Question element not found." });
           return;
