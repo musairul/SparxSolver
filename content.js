@@ -200,7 +200,12 @@ function isNumericAnswer() {
 }
 
 function formatNumericAnswer(answer) {
-  return String(answer).match(/-?\d+(\.\d+)?/g) || [];
+  const str = String(answer);
+
+  // Match numbers that are NOT part of a unit exponent like ^2
+  const matches = str.match(/(?<!\^)-?\d+(\.\d+)?(?!\w)/g);
+
+   return matches || [];
 }
 
 function getImageAnswerChoices() {
