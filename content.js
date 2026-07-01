@@ -152,6 +152,264 @@
     });
   }
 
+ function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForContinue(timeout = 5000, interval = 100) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    const continueLink = findContinueLink();
+
+    if (continueLink) {
+      return continueLink;
+    }
+
+    await sleep(interval);
+  }
+
+  return null;
+}
+
+function findAnswerButton() {
+  console.log("[SparxSolver] Finding Answer button...");
+
+  return [...document.querySelectorAll("button")].find(button =>
+    button.textContent.trim().toLowerCase() === "answer"
+  ) || null;
+}
+
+function clickAnswerButton() {
+  console.log("[SparxSolver] Clicking Answer button...");
+
+  const button = findAnswerButton();
+
+  if (!button) {
+    console.error("[SparxSolver] Answer button not found.");
+    return false;
+  }
+
+  button.click();
+  return true;
+}
+
+function isNumericAnswer() {
+  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad]"));
+  return !!document.querySelector("[data-numeric-keypad]");
+}
+
+function formatNumericAnswer(answer) {
+  //finds all numbers and returns the last one, which is usually the final answer
+  const matches = String(answer).match(/-?\d+(\.\d+)?/g);
+  return matches ? matches[matches.length - 1] : null;
+}
+
+async function typeNumericAnswer(finalAnswer) {
+  finalAnswer = formatNumericAnswer(finalAnswer);
+  console.log("[SparxSolver] Typing numeric answer:", finalAnswer);
+
+  const input = document.querySelector("input[data-ref][readonly]");
+
+  if (!input) {
+    console.error("[SparxSolver] Numeric input not found.");
+    return false;
+  }
+
+  input.click();
+  input.focus();
+
+  await sleep(100);
+
+  for (const key of String(finalAnswer)) {
+    let code;
+
+    if (/^\d$/.test(key)) {
+      code = `Digit${key}`;
+    } else if (key === ".") {
+      code = "Period";
+    } else if (key === "-") {
+      code = "Minus";
+    } else {
+      code = `Key${key.toUpperCase()}`;
+    }
+
+    input.dispatchEvent(new KeyboardEvent("keydown", {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true
+    }));
+
+    input.dispatchEvent(new KeyboardEvent("keypress", {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true
+    }));
+
+    input.dispatchEvent(new KeyboardEvent("keyup", {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true
+    }));
+
+    await sleep(20);
+  }
+
+  return true;
+}
+
+async function typeAnswer(finalAnswer) {
+  if (isNumericAnswer()) {
+    return await typeNumericAnswer(finalAnswer);
+  }
+
+  console.error("[SparxSolver] Unsupported answer type.");
+  return false;
+}
+
+function waitForSubmitButton(timeout = 10000, interval = 100) {
+  console.log("[SparxSolver] Waiting for Submit button...");
+
+  return new Promise((resolve) => {
+    const start = Date.now();
+
+    const timer = setInterval(() => {
+      const btn = findSubmitButton();
+
+      if (btn) {
+        clearInterval(timer);
+        console.log("[SparxSolver] Submit button found.");
+        return resolve(btn);
+      }
+
+      if (Date.now() - start > timeout) {
+        clearInterval(timer);
+        console.log("[SparxSolver] Submit button timeout.");
+        return resolve(null);
+      }
+    }, interval);
+  });
+}
+
+function findSubmitButton() {
+  console.log("[SparxSolver] Finding Submit button...");
+
+  return [...document.querySelectorAll("button")].find(button =>
+    button.textContent.trim().toLowerCase().startsWith("submit")
+  ) || null;
+}
+
+function clickSubmitButton(button) {
+  console.log("[SparxSolver] Clicking Submit button...");
+
+  if (!button) {
+    console.error("[SparxSolver] Submit button not found.");
+    return false;
+  }
+
+  button.click();
+  return true;
+}
+
+function waitForContinueLink(timeout = 10000, interval = 500) {
+  console.log("[SparxSolver] Waiting for Continue link...");
+
+  return new Promise((resolve) => {
+    const start = Date.now();
+
+    const timer = setInterval(() => {
+      const link = findContinueLink();
+
+      if (link) {
+        const pointerEvents = window.getComputedStyle(link).pointerEvents;
+
+        // clickable when NOT "none"
+        if (pointerEvents !== "none") {
+          clearInterval(timer);
+          console.log("[SparxSolver] Continue link is clickable.");
+          return resolve(link);
+        }
+      }
+
+      if (Date.now() - start > timeout) {
+        clearInterval(timer);
+        console.log("[SparxSolver] Continue link timeout.");
+        return resolve(null);
+      }
+    }, interval);
+  });
+}
+
+function findContinueLink() {
+  console.log("[SparxSolver] Finding Continue link...");
+
+  return [...document.querySelectorAll("a")].find(link =>
+    link.textContent.trim().toLowerCase() === "continue"
+  ) || null;
+}
+
+function disableAutoSolveAfterFailure() {
+  chrome.storage.local.set({ autoSolveEnabled: false }, () => {
+    chrome.runtime.sendMessage({ action: "autoSolveDisabled" });
+  });
+}
+
+function handleAutoSolveFailure() {
+  console.error("[SparxSolver] Auto solve failed.");
+
+  disableAutoSolveAfterFailure();
+  alert("Auto solve failed");
+}
+
+async function runAutoSolvePageFlow(finalAnswer) {
+  console.log("[SparxSolver] Auto solve answer ready:", finalAnswer);
+
+  // Click the Answer button
+  if (!clickAnswerButton()) {
+    handleAutoSolveFailure();
+    return;
+  }
+
+  const submitBtn = await waitForSubmitButton();
+
+  if (!submitBtn) {
+    handleAutoSolveFailure();
+    return;
+  }
+
+  // Type the answer
+  if (!(await typeAnswer(finalAnswer))) {
+    handleAutoSolveFailure();
+    return;
+  }
+
+  await sleep(150);
+
+  // Click Submit
+  if (!clickSubmitButton(submitBtn)) {
+    handleAutoSolveFailure();
+    return;
+  }
+
+  await sleep(1500);
+
+  console.log("[SparxSolver] Waiting for Continue link...");
+
+  const continueLink = await waitForContinueLink();
+
+  if (!continueLink) {
+    handleAutoSolveFailure();
+    return;
+  }
+
+  console.log("[SparxSolver] Continue link found.");
+
+  continueLink.click();
+}
+
   const IFRAME_ID = "sparx-solver-iframe";
   const MAX_IFRAME_HEIGHT = 700; // Maximum height for the iframe in pixels
   let iframe = null;
@@ -194,28 +452,52 @@
     );
   }
 
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "toggle_ui") {
-      console.log("[SparxSolver] Toggle UI message received.");
-      toggleIframe();
-      sendResponse({ status: "UI toggled" });
-    } else if (request.action === "enablePointerEvents") {
-      setTimeout(() => {
-        document.body.style.setProperty("pointer-events", "all", "important");
-        console.log(
-          "[SparxSolver] Pointer events enabled on body with !important after 2000ms delay."
-        );
-        sendResponse({
-          status: "Pointer events enabled with !important after delay",
-        });
+ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "toggle_ui") {
+    console.log("[SparxSolver] Toggle UI message received.");
+    toggleIframe();
+    sendResponse({ status: "UI toggled" });
+  }
 
-        // ---- BOOKWORK CHECK LOGIC ----
-        findAndDisplayBookworkAnswer();
-        // ---- END BOOKWORK CHECK LOGIC ----
-      }, 2000); // Current delay
-    }
-    return true; // Keep the message channel open for async response
-  });
+  else if (request.action === "autoSolveAnswerReady") {
+    (async () => {
+      try {
+        await runAutoSolvePageFlow(request.finalAnswer);
+
+        sendResponse({
+          status: "Auto solve completed"
+        });
+      } catch (err) {
+        console.error("[SparxSolver] Auto solve failed:", err);
+
+        sendResponse({
+          status: "Auto solve failed",
+          error: err.message
+        });
+      }
+    })();
+  }
+
+  else if (request.action === "enablePointerEvents") {
+    setTimeout(() => {
+      document.body.style.setProperty("pointer-events", "all", "important");
+
+      console.log(
+        "[SparxSolver] Pointer events enabled on body with !important after 2000ms delay."
+      );
+
+      sendResponse({
+        status: "Pointer events enabled with !important after delay",
+      });
+
+      // ---- BOOKWORK CHECK LOGIC ----
+      findAndDisplayBookworkAnswer();
+      // ---- END BOOKWORK CHECK LOGIC ----
+    }, 2000);
+  }
+
+  return true;
+});
 
   // Listen for messages from the iframe (e.g., to close itself or resize)
   window.addEventListener("message", (event) => {

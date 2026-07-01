@@ -57,6 +57,177 @@ document.addEventListener("DOMContentLoaded", function () {
       : "Solve Math Problem";
   }
 
+  let isAutoSolveRunning = false;
+
+  function getLocalStorage(keys) {
+    return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
+  }
+
+  function setLocalStorage(values) {
+    return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+  }
+
+  function disableAutoSolveSetting() {
+    return setLocalStorage({ autoSolveEnabled: false }).then(() => {
+      if (autoSolveToggle) autoSolveToggle.checked = false;
+      setSolveButtonAutoState(false);
+      sendHeightToParent();
+    });
+  }
+
+  function extractFinalAnswer(solutionText) {
+    const lines = solutionText.trim().split("\n");
+    return lines[lines.length - 1] || "";
+  }
+
+  function renderSolveResult(solutionBuffer) {
+    loadingIndicator.style.display = "none";
+    resultContainer.style.display = "block";
+
+    let solution = solutionBuffer;
+    solution = solution.replace(/\text/g, "\\text");
+    const finalAnswerText = extractFinalAnswer(solution);
+    const finalAnswerDisplayElement = document.createElement("div");
+    finalAnswerDisplayElement.classList.add("final-answer-display");
+    finalAnswerDisplayElement.textContent = finalAnswerText;
+    renderMathInElement(finalAnswerDisplayElement, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+      ],
+    });
+    resultContainer.innerHTML = "";
+
+    if (explanationText && finalAnswerDisplay) {
+      finalAnswerDisplay.innerHTML = "";
+      finalAnswerDisplay.appendChild(finalAnswerDisplayElement);
+
+      const explanationDiv = document.createElement("div");
+      explanationDiv.innerHTML = solutionBuffer.replace(/\n/g, "<br>");
+      explanationDiv.style.whiteSpace = "pre-wrap";
+      explanationDiv.style.wordWrap = "break-word";
+
+      renderMathInElement(explanationDiv, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false },
+        ],
+      });
+      explanationText.innerHTML = "";
+      explanationText.appendChild(explanationDiv);
+    }
+
+    if (finalAnswerScreen) {
+      finalAnswerScreen.style.display = "block";
+      resultContainer.style.display = "none";
+    }
+
+    if (explanationText && toggleExplanationBtn) {
+      explanationText.style.display = "none";
+      toggleExplanationBtn.textContent = "Expand Explanation";
+    }
+
+    sendHeightToParent();
+    return { solution, finalAnswer: finalAnswerText };
+  }
+
+  async function sendAutoSolveAnswerToContent(finalAnswer) {
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+
+    if (!tab || !tab.id) {
+      throw new Error("No active tab found for auto solve handoff.");
+    }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(
+        tab.id,
+        { action: "autoSolveAnswerReady", finalAnswer },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn(
+              "[SparxSolver] Auto solve handoff failed:",
+              chrome.runtime.lastError.message
+            );
+            resolve(null);
+            return;
+          }
+          resolve(response);
+        }
+      );
+    });
+  }
+
+  async function runSolveMath() {
+    const data = await getLocalStorage(["apiKey", "provider", "model"]);
+    if (!data.apiKey || !data.provider || !data.model) {
+      showApiKeyScreen();
+      throw new Error("Missing API key, provider, or model.");
+    }
+
+    if (finalAnswerScreen) {
+      finalAnswerScreen.style.display = "none";
+    }
+    resultContainer.style.display = "block";
+    loadingIndicator.style.display = "block";
+    resultContainer.innerHTML = "";
+    sendHeightToParent();
+
+    return new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: "solveMathStream" });
+      let solutionBuffer = "";
+      let isDone = false;
+
+      port.onMessage.addListener((msg) => {
+        if (msg.chunk) {
+          solutionBuffer += msg.chunk;
+          resultContainer.textContent = solutionBuffer;
+        }
+
+        if (msg.error) {
+          loadingIndicator.style.display = "none";
+          resultContainer.textContent = "Error: " + msg.error;
+          port.disconnect();
+          isDone = true;
+          reject(new Error(msg.error));
+        }
+
+        if (msg.done && !isDone) {
+          isDone = true;
+          const result = renderSolveResult(solutionBuffer);
+          port.disconnect();
+          resolve(result);
+        }
+      });
+
+      port.postMessage({ action: "solveMath" });
+    });
+  }
+
+  async function runAutoSolveOnce() {
+    if (isAutoSolveRunning) {
+      return;
+    }
+
+    isAutoSolveRunning = true;
+    try {
+      const { finalAnswer } = await runSolveMath();
+      await setLocalStorage({ lastAutoSolveAnswer: finalAnswer });
+      await sendAutoSolveAnswerToContent(finalAnswer);
+    } catch (error) {
+      console.error("[SparxSolver] Auto solve failed:", error);
+      await disableAutoSolveSetting();
+    } finally {
+      isAutoSolveRunning = false;
+    }
+  }
+
   function loadAutoSettings() {
     chrome.storage.local.get(
       ["autoSolveEnabled", "autoBookworkEnabled"],
@@ -77,6 +248,9 @@ document.addEventListener("DOMContentLoaded", function () {
       const autoSolveEnabled = autoSolveToggle.checked;
       chrome.storage.local.set({ autoSolveEnabled }, () => {
         setSolveButtonAutoState(autoSolveEnabled);
+        if (autoSolveEnabled) {
+          runAutoSolveOnce();
+        }
         sendHeightToParent();
       });
     });
@@ -90,6 +264,14 @@ document.addEventListener("DOMContentLoaded", function () {
       );
     });
   }
+
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.action === "autoSolveDisabled") {
+      if (autoSolveToggle) autoSolveToggle.checked = false;
+      setSolveButtonAutoState(false);
+      sendHeightToParent();
+    }
+  });
 
   loadAutoSettings();
 
@@ -457,100 +639,8 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
-      if (!data.apiKey || !data.provider || !data.model) {
-        showApiKeyScreen();
-        return;
-      }
-      // Hide final answer screen and show result container for new solve
-      if (finalAnswerScreen) {
-        finalAnswerScreen.style.display = "none";
-      }
-      // FIX: Only show resultContainer, not create or append new ones
-      resultContainer.style.display = "block";
-      loadingIndicator.style.display = "block";
-      resultContainer.innerHTML = "";
-
-      // Use a port for streaming
-      const port = chrome.runtime.connect({ name: "solveMathStream" });
-      let solutionBuffer = "";
-      let isDone = false;
-
-      port.onMessage.addListener((msg) => {
-        if (msg.chunk) {
-          solutionBuffer += msg.chunk;
-          // Show the streaming text as it arrives
-          resultContainer.textContent = solutionBuffer;
-        }
-        if (msg.error) {
-          loadingIndicator.style.display = "none";
-          resultContainer.textContent = "Error: " + msg.error;
-          port.disconnect();
-          isDone = true;
-        }
-        if (msg.done && !isDone) {
-          loadingIndicator.style.display = "none";
-          resultContainer.style.display = "block";
-          isDone = true;
-          // Final formatting (same as before, but using solutionBuffer)
-          let solution = solutionBuffer;
-          solution = solution.replace(/\text/g, "\\text");
-          const lines = solution.trim().split("\n");
-          const finalAnswerText = lines[lines.length - 1];
-          const finalAnswerDisplayElement = document.createElement("div");
-          finalAnswerDisplayElement.classList.add("final-answer-display");
-          finalAnswerDisplayElement.textContent = finalAnswerText;
-          renderMathInElement(finalAnswerDisplayElement, {
-            delimiters: [
-              { left: "$$", right: "$$", display: true },
-              { left: "$", right: "$", display: false },
-              { left: "\\[", right: "\\]", display: true },
-              { left: "\\(", right: "\\)", display: false },
-            ],
-          });
-          resultContainer.innerHTML = "";
-          // DO NOT append finalAnswerDisplayElement to resultContainer here
-
-          // Populate explanation text with the full solution
-          if (explanationText && finalAnswerDisplay) {
-            finalAnswerDisplay.innerHTML = "";
-            finalAnswerDisplay.appendChild(finalAnswerDisplayElement);
-
-            const explanationDiv = document.createElement("div");
-            explanationDiv.innerHTML = solutionBuffer.replace(/\n/g, "<br>");
-            explanationDiv.style.whiteSpace = "pre-wrap";
-            explanationDiv.style.wordWrap = "break-word";
-
-            renderMathInElement(explanationDiv, {
-              delimiters: [
-                { left: "$$", right: "$$", display: true },
-                { left: "$", right: "$", display: false },
-                { left: "\\[", right: "\\]", display: true },
-                { left: "\\(", right: "\\)", display: false },
-              ],
-            });
-            explanationText.innerHTML = "";
-            explanationText.appendChild(explanationDiv);
-          }
-
-          // Show final answer screen within the solve tab
-          if (finalAnswerScreen) {
-            finalAnswerScreen.style.display = "block";
-            resultContainer.style.display = "none";
-          }
-
-          if (explanationText && toggleExplanationBtn) {
-            explanationText.style.display = "none";
-            toggleExplanationBtn.textContent = "Expand Explanation";
-          }
-
-          sendHeightToParent();
-          port.disconnect();
-        }
-      });
-      port.postMessage({ action: "solveMath" });
+    runSolveMath().catch((error) => {
+      console.error("[SparxSolver] Solve failed:", error);
     });
-
-    sendHeightToParent();
   });
 });
