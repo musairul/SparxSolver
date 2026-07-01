@@ -195,14 +195,12 @@ function clickAnswerButton() {
 }
 
 function isNumericAnswer() {
-  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad]"));
-  return !!document.querySelector("[data-numeric-keypad]");
+  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad], div[class*='TextFieldNumeric']"));
+  return !!document.querySelector("[data-numeric-keypad], div[class*='TextFieldNumeric']");
 }
 
 function formatNumericAnswer(answer) {
-  //finds all numbers and returns the last one, which is usually the final answer
-  const matches = String(answer).match(/-?\d+(\.\d+)?/g);
-  return matches ? matches[matches.length - 1] : null;
+  return String(answer).match(/-?\d+(\.\d+)?/g) || [];
 }
 
 function getImageAnswerChoices() {
@@ -399,59 +397,91 @@ async function recognizeImageChoiceAnswer(finalAnswer) {
   return { recognizedOnly: false, choiceIndex };
 }
 
+function getNumericAnswerInputs() {
+  return [...document.querySelectorAll("input[data-ref][readonly]")];
+}
+
+async function typeIntoNumericInput(input, key) {
+  input.click();
+  input.focus();
+
+  await sleep(20);
+
+  let code;
+
+  if (/^\d$/.test(key)) {
+    code = `Digit${key}`;
+  } else if (key === ".") {
+    code = "Period";
+  } else if (key === "-") {
+    code = "Minus";
+  } else {
+    code = `Key${key.toUpperCase()}`;
+  }
+
+  input.dispatchEvent(new KeyboardEvent("keydown", {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true
+  }));
+
+  input.dispatchEvent(new KeyboardEvent("keypress", {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true
+  }));
+
+  input.dispatchEvent(new KeyboardEvent("keyup", {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true
+  }));
+
+  await sleep(20);
+}
+
 async function typeNumericAnswer(finalAnswer) {
-  finalAnswer = formatNumericAnswer(finalAnswer);
-  console.log("[SparxSolver] Typing numeric answer:", finalAnswer);
+  const inputs = getNumericAnswerInputs();
 
-  const input = document.querySelector("input[data-ref][readonly]");
-
-  if (!input) {
+  if (!inputs.length) {
     console.error("[SparxSolver] Numeric input not found.");
     return false;
   }
 
-  input.click();
-  input.focus();
+  const matches = formatNumericAnswer(finalAnswer);
+  const normalizedAnswer = matches[matches.length - 1] || null;
+  console.log("[SparxSolver] Typing numeric answer:", normalizedAnswer);
 
-  await sleep(100);
+  if (inputs.length > 1) {
+    const valuesToType = matches.slice(-inputs.length);
 
-  for (const key of String(finalAnswer)) {
-    let code;
-
-    if (/^\d$/.test(key)) {
-      code = `Digit${key}`;
-    } else if (key === ".") {
-      code = "Period";
-    } else if (key === "-") {
-      code = "Minus";
-    } else {
-      code = `Key${key.toUpperCase()}`;
+    if (!valuesToType.length) {
+      console.error("[SparxSolver] No numeric values found for multi-input answer.");
+      return false;
     }
 
-    input.dispatchEvent(new KeyboardEvent("keydown", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
+    console.log(
+      `[SparxSolver] Found ${inputs.length} numeric inputs; typing the last ${inputs.length} values:`,
+      valuesToType
+    );
 
-    input.dispatchEvent(new KeyboardEvent("keypress", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
+    for (let i = 0; i < inputs.length; i += 1) {
+      const input = inputs[i];
+      const value = valuesToType[i];
+      if (!value) {
+        break;
+      }
+      await typeIntoNumericInput(input, value);
+    }
 
-    input.dispatchEvent(new KeyboardEvent("keyup", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
-
-    await sleep(20);
+    return true;
   }
 
+  const input = inputs[0];
+  await typeIntoNumericInput(input, String(normalizedAnswer));
   return true;
 }
 
