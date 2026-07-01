@@ -205,6 +205,200 @@ function formatNumericAnswer(answer) {
   return matches ? matches[matches.length - 1] : null;
 }
 
+function getImageAnswerChoices() {
+  return [...document.querySelectorAll('div[role="button"]')].filter((div) =>
+    div.querySelector("img")
+  );
+}
+
+function isImageChoiceAnswer() {
+  const choices = getImageAnswerChoices();
+  console.log("[SparxSolver] isImageChoiceAnswer =", choices.length > 1);
+  return choices.length > 1;
+}
+
+function getImageChoiceCaptureRoot(choices) {
+  const answerPart = choices[0]?.closest("div[class*='AnswerPart']");
+  if (answerPart) return answerPart;
+
+  const answerScreen = choices[0]?.closest("div[class*='AnswerScreen']");
+  if (answerScreen) return answerScreen;
+
+  return choices[0]?.parentElement || document.body;
+}
+
+function addImageChoiceNumberBadges(choices) {
+  const badges = [];
+
+  choices.forEach((choice, index) => {
+    const previousPosition = choice.style.position;
+    if (window.getComputedStyle(choice).position === "static") {
+      choice.style.position = "relative";
+    }
+
+    const badge = document.createElement("div");
+    badge.textContent = String(index + 1);
+    badge.style.position = "absolute";
+    badge.style.top = "6px";
+    badge.style.left = "6px";
+    badge.style.zIndex = "999999";
+    badge.style.width = "24px";
+    badge.style.height = "24px";
+    badge.style.borderRadius = "50%";
+    badge.style.background = "#000";
+    badge.style.color = "#fff";
+    badge.style.fontSize = "14px";
+    badge.style.fontWeight = "bold";
+    badge.style.lineHeight = "24px";
+    badge.style.textAlign = "center";
+    badge.style.pointerEvents = "none";
+    badge.dataset.sparxSolverImageChoiceBadge = "true";
+
+    choice.appendChild(badge);
+    badges.push({ badge, choice, previousPosition });
+  });
+
+  return () => {
+    badges.forEach(({ badge, choice, previousPosition }) => {
+      badge.remove();
+      choice.style.position = previousPosition;
+    });
+  };
+}
+
+function ensureHtml2CanvasLoaded() {
+  if (window.html2canvas) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("libs/html2canvas.min.js");
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Failed to load html2canvas."));
+    document.head.appendChild(script);
+  });
+}
+
+async function captureImageChoiceArea() {
+  const choices = getImageAnswerChoices();
+  if (choices.length < 2) {
+    throw new Error("Image answer choices not found.");
+  }
+
+  await ensureHtml2CanvasLoaded();
+
+  const captureRoot = getImageChoiceCaptureRoot(choices);
+  const removeBadges = addImageChoiceNumberBadges(choices);
+  const replaced = typeof replaceInputsWithSpans === "function"
+    ? replaceInputsWithSpans(captureRoot)
+    : [];
+
+  try {
+    const canvas = await window.html2canvas(captureRoot, {
+      scale: window.devicePixelRatio * 2,
+      scrollY: -window.scrollY,
+      useCORS: true,
+      allowTaint: true,
+    });
+    return {
+      imageDataUrl: canvas.toDataURL(),
+      choiceCount: choices.length,
+    };
+  } finally {
+    if (typeof restoreInputs === "function") {
+      restoreInputs(replaced);
+    }
+    removeBadges();
+  }
+}
+
+function chooseImageAnswer(finalAnswer, imageDataUrl, choiceCount) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        action: "chooseImageAnswer",
+        finalAnswer,
+        imageDataUrl,
+        choiceCount,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (!response || response.error) {
+          reject(new Error(response?.error || "Image answer choice failed."));
+          return;
+        }
+
+        resolve(response);
+      }
+    );
+  });
+}
+
+function setLocalStorage(values) {
+  return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+function selectImageAnswerChoiceMock(index) {
+  if (window.__sparxSolverMockSelectionEnabled !== true) {
+    return false;
+  }
+
+  const fixture = document.querySelectorAll('[data-sparx-solver-mock-choice]')[index - 1];
+  if (fixture) {
+    fixture.click();
+    return true;
+  }
+
+  return false;
+}
+
+function selectImageAnswerChoice(index) {
+  const normalizedIndex = Number(index);
+  const choices = getImageAnswerChoices();
+  const targetChoice = choices[normalizedIndex - 1];
+
+  if (targetChoice) {
+    targetChoice.click();
+    console.log(
+      `[SparxSolver] Clicked image answer choice ${normalizedIndex} on the live page.`
+    );
+    return true;
+  }
+
+  if (window.__sparxSolverMockSelectionEnabled === true) {
+    return selectImageAnswerChoiceMock(index);
+  }
+
+  console.log(
+    "[SparxSolver] Could not find the requested image answer choice to click:",
+    index
+  );
+  return false;
+}
+
+async function recognizeImageChoiceAnswer(finalAnswer) {
+  const { imageDataUrl, choiceCount } = await captureImageChoiceArea();
+  const { choiceIndex, rawText } = await chooseImageAnswer(
+    finalAnswer,
+    imageDataUrl,
+    choiceCount
+  );
+
+  await setLocalStorage({
+    lastImageAnswerChoiceIndex: choiceIndex,
+    lastImageAnswerChoiceRawText: rawText,
+  });
+
+  console.log(`[SparxSolver] Recommended image answer choice: ${choiceIndex}`);
+  selectImageAnswerChoice(choiceIndex);
+  return { recognizedOnly: false, choiceIndex };
+}
+
 async function typeNumericAnswer(finalAnswer) {
   finalAnswer = formatNumericAnswer(finalAnswer);
   console.log("[SparxSolver] Typing numeric answer:", finalAnswer);
@@ -262,6 +456,10 @@ async function typeNumericAnswer(finalAnswer) {
 }
 
 async function typeAnswer(finalAnswer) {
+  if (isImageChoiceAnswer()) {
+    return await recognizeImageChoiceAnswer(finalAnswer);
+  }
+
   if (isNumericAnswer()) {
     return await typeNumericAnswer(finalAnswer);
   }
@@ -380,8 +578,17 @@ async function runAutoSolvePageFlow(finalAnswer) {
     return;
   }
 
-  // Type the answer
-  if (!(await typeAnswer(finalAnswer))) {
+  // Type or recognize the answer
+  let answerResult;
+  try {
+    answerResult = await typeAnswer(finalAnswer);
+  } catch (err) {
+    console.error("[SparxSolver] Answer recognition failed:", err);
+    handleAutoSolveFailure();
+    return;
+  }
+
+  if (!answerResult) {
     handleAutoSolveFailure();
     return;
   }

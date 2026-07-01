@@ -40,6 +40,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     captureAndProcessScreenshot(sendResponse);
     return true;
   }
+  if (request.action === "chooseImageAnswer") {
+    chooseImageAnswer(request, sendResponse);
+    return true;
+  }
   if (request.action === "saveBookwork") {
     if (request.code && request.url) {
       chrome.storage.local.get("bookworks", (data) => {
@@ -54,6 +58,170 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+function extractImageChoiceIndex(responseText, choiceCount) {
+  const matches = String(responseText).match(/-?\d+(\.\d+)?/g);
+  if (!matches) return null;
+
+  const parsed = Number(matches[matches.length - 1]);
+  if (!Number.isInteger(parsed)) return null;
+  if (parsed < 1 || parsed > choiceCount) return null;
+  return parsed;
+}
+
+function extractProviderTextContent(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("");
+  }
+
+  return "";
+}
+
+async function getProviderSettings() {
+  const {
+    apiKey: storedApiKey,
+    provider: storedProvider,
+    model: storedModel,
+  } = await new Promise((resolve) =>
+    chrome.storage.local.get(["apiKey", "provider", "model"], resolve)
+  );
+
+  if (!storedApiKey || !storedProvider || (!storedModel && !PROVIDERS[storedProvider]?.models)) {
+    let missingFields = [];
+    if (!storedProvider) missingFields.push("Provider");
+    if (!storedApiKey) missingFields.push("API Key");
+    if (!storedModel && !PROVIDERS[storedProvider]?.models) missingFields.push("Model");
+    throw new Error(
+      `Missing configuration: ${missingFields.join(", ")}. Please set them in the extension popup before solving problems.`
+    );
+  }
+
+  const providerConfig = PROVIDERS[storedProvider];
+  if (!providerConfig) {
+    const availableProviders = Object.keys(PROVIDERS).join(", ");
+    throw new Error(
+      `Unknown provider "${storedProvider}". Available providers: ${availableProviders}. Please select a valid provider in the extension settings.`
+    );
+  }
+
+  const modelsToTry =
+    providerConfig.models && providerConfig.models.length > 0
+      ? providerConfig.models
+      : [storedModel];
+
+  return {
+    apiKey: storedApiKey,
+    provider: storedProvider,
+    providerConfig,
+    modelsToTry,
+  };
+}
+
+async function chooseImageAnswer(request, sendResponse) {
+  try {
+    const { finalAnswer, imageDataUrl, choiceCount } = request;
+    if (!finalAnswer || !imageDataUrl || !choiceCount) {
+      sendResponse({
+        error: "Missing final answer, image data, or choice count for image answer selection.",
+      });
+      return;
+    }
+
+    const { apiKey, providerConfig, modelsToTry } = await getProviderSettings();
+    const prompt =
+      `Given this final answer and the image of numbered choices, return only the number of the image that best fits the answer. ` +
+      `Images are numbered from 1 in their current order. There are ${choiceCount} images. Final answer: ${finalAnswer}`;
+
+    let response = null;
+    let fetchError = null;
+
+    for (const modelToTry of modelsToTry) {
+      const requestBody = {
+        model: modelToTry,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageDataUrl,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 100,
+        temperature: 0,
+      };
+
+      try {
+        const res = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (res.ok) {
+          response = res;
+          break;
+        }
+
+        response = res;
+        console.warn(
+          `[SparxSolver] Image answer model ${modelToTry} failed with status ${res.status}. Falling back if available...`
+        );
+      } catch (err) {
+        fetchError = err;
+        console.warn(`[SparxSolver] Image answer model ${modelToTry} fetch error:`, err);
+      }
+    }
+
+    if (fetchError && !response) {
+      throw fetchError;
+    }
+
+    if (!response || !response.ok) {
+      const status = response ? response.status : 0;
+      const statusText = response ? response.statusText : "";
+      sendResponse({
+        error: `Image answer request failed: ${status} ${statusText} from ${providerConfig.name}.`,
+      });
+      return;
+    }
+
+    const responseData = await response.json();
+    const rawText = extractProviderTextContent(
+      responseData.choices?.[0]?.message?.content
+    );
+    const choiceIndex = extractImageChoiceIndex(rawText, choiceCount);
+
+    if (choiceIndex === null || choiceIndex === undefined) {
+      sendResponse({
+        error: `Could not extract a valid image choice number from provider response: ${rawText}`,
+        rawText,
+      });
+      return;
+    }
+
+    sendResponse({ rawText, choiceIndex });
+  } catch (error) {
+    console.error("[SparxSolver] Image answer selection failed:", error);
+    sendResponse({
+      error: error.message || "Unknown image answer selection error.",
+    });
+  }
+}
 
 chrome.runtime.onConnect.addListener(function (port) {
   if (port.name === "solveMathStream") {

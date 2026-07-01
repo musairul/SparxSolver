@@ -97,7 +97,7 @@ function restoreInputs(replaced) {
 function screenshotQuestionDivWithDelay(bookworkCode) {
   blockContinueButton(true);
   setTimeout(() => {
-    const questionDiv = document.querySelector("div[class*='AnswerScreen'], div[class*='AnswerPart']");
+    const questionDiv = document.querySelector("div[class*='AnswerScreen'], div[class*='AnswerPart'], div[class*='OptionSelected']");
     if (!questionDiv) {
       console.log("Question div not found for screenshot.");
       blockContinueButton(false);
