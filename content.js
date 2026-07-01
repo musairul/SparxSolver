@@ -195,8 +195,8 @@ function clickAnswerButton() {
 }
 
 function isNumericAnswer() {
-  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad], div[class*='TextFieldNumeric']"));
-  return !!document.querySelector("[data-numeric-keypad], div[class*='TextFieldNumeric']");
+  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad], input[class*='TextFieldNumeric']"));
+  return !!document.querySelector("[data-numeric-keypad], input[class*='TextFieldNumeric']");
 }
 
 function formatNumericAnswer(answer) {
@@ -403,7 +403,7 @@ async function recognizeImageChoiceAnswer(finalAnswer) {
 }
 
 function getNumericAnswerInputs() {
-  return [...document.querySelectorAll("input[data-ref][readonly]")];
+  return [...document.querySelectorAll("input[class*='TextFieldNumeric']")];
 }
 
 async function typeIntoNumericInput(input, value) {
