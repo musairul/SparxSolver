@@ -21,6 +21,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const tabHeader = document.getElementById("tabHeader");
   const providerSelect = document.getElementById("providerSelect");
   const apiKeyGroup = document.getElementById("apiKeyGroup");
+  const autoSolveToggle = document.getElementById("autoSolveToggle");
+  const autoBookworkToggle = document.getElementById("autoBookworkToggle");
 
   const PROVIDER_MODELS = {
     openrouter: "openrouter/free",
@@ -47,6 +49,49 @@ document.addEventListener("DOMContentLoaded", function () {
       }, 250);
     }, 100);
   }
+
+  function setSolveButtonAutoState(isAutoSolveEnabled) {
+    solveButton.disabled = isAutoSolveEnabled;
+    solveButton.textContent = isAutoSolveEnabled
+      ? "Auto Solve Enabled"
+      : "Solve Math Problem";
+  }
+
+  function loadAutoSettings() {
+    chrome.storage.local.get(
+      ["autoSolveEnabled", "autoBookworkEnabled"],
+      (data) => {
+        const autoSolveEnabled = Boolean(data.autoSolveEnabled);
+        const autoBookworkEnabled = Boolean(data.autoBookworkEnabled);
+
+        if (autoSolveToggle) autoSolveToggle.checked = autoSolveEnabled;
+        if (autoBookworkToggle) autoBookworkToggle.checked = autoBookworkEnabled;
+        setSolveButtonAutoState(autoSolveEnabled);
+        sendHeightToParent();
+      }
+    );
+  }
+
+  if (autoSolveToggle) {
+    autoSolveToggle.addEventListener("change", () => {
+      const autoSolveEnabled = autoSolveToggle.checked;
+      chrome.storage.local.set({ autoSolveEnabled }, () => {
+        setSolveButtonAutoState(autoSolveEnabled);
+        sendHeightToParent();
+      });
+    });
+  }
+
+  if (autoBookworkToggle) {
+    autoBookworkToggle.addEventListener("change", () => {
+      chrome.storage.local.set(
+        { autoBookworkEnabled: autoBookworkToggle.checked },
+        sendHeightToParent
+      );
+    });
+  }
+
+  loadAutoSettings();
 
   // Clear Bookworks Button Logic
   const clearBtn = document.getElementById("clearBookworksBtn");
@@ -408,6 +453,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   solveButton.addEventListener("click", () => {
+    if (solveButton.disabled) {
+      return;
+    }
+
     chrome.storage.local.get(["apiKey", "provider", "model"], (data) => {
       if (!data.apiKey || !data.provider || !data.model) {
         showApiKeyScreen();

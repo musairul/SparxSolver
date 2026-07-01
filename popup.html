@@ -34,6 +34,26 @@
           <button id="saveApiKeyButton">Save</button>
         </div>
       </div>
+      <div id="autoSettingsPanel">
+        <label
+          class="toggle-row"
+          for="autoSolveToggle"
+          title="Automatically solves the problem, moves onto the next question and repeats."
+        >
+          <span>Auto Solve</span>
+          <input type="checkbox" id="autoSolveToggle" />
+          <span class="switch" aria-hidden="true"></span>
+        </label>
+        <label
+          class="toggle-row"
+          for="autoBookworkToggle"
+          title="Automatically inputs the correct answer to the bookwork check"
+        >
+          <span>Auto Bookwork</span>
+          <input type="checkbox" id="autoBookworkToggle" />
+          <span class="switch" aria-hidden="true"></span>
+        </label>
+      </div>
       <button id="solveButton">Solve Math Problem</button>
       <div id="loadingIndicator">Loading...</div>
       <div id="resultContainer"></div>
