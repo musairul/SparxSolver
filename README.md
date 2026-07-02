@@ -4,7 +4,7 @@ A powerful Chrome extension that uses AI to **automatically** solve Sparx Maths 
 
 ## ✨ Features
 
-- **🆕 Auto Solve and Auto Bookwork**: Fully automates question answering and bookwork checks -- completely hands free
+- **🆕 Auto Solve**: Fully automates question answering and bookwork checks - completely hands free!
 - **🤖 AI-Powered Math Solving**: Uses AI to analyze and solve complex math problems
 - **📚 Saves Bookworks**: Save and organize solved problems for future reference
 - **🔍 Step-by-Step Solutions**: Get detailed explanations with mathematical reasoning
