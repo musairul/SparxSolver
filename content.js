@@ -194,10 +194,44 @@ function clickAnswerButton() {
   return true;
 }
 
-function isNumericAnswer() {
-  console.log('isNumericAnswer =', !!document.querySelector("[data-numeric-keypad], input[class*='TextFieldNumeric']"));
-  return !!document.querySelector("[data-numeric-keypad], input[class*='TextFieldNumeric']");
+function getOrderedAnswerItems() {
+  const answerParts = [
+    ...document.querySelectorAll("[class*='AnswerPart']")
+  ];
+
+  const items = [];
+
+  for (const part of answerParts) {
+    const numericInputs = [
+      ...part.querySelectorAll("input[class*='TextFieldNumeric']")
+    ];
+
+    if (numericInputs.length) {
+      for (const input of numericInputs) {
+        items.push({
+          type: "numeric",
+          input
+        });
+      }
+    }
+
+    const imageChoices = [
+      ...part.querySelectorAll('div[role="button"]')
+    ].filter(choice => choice.querySelector("img"));
+
+    if (imageChoices.length > 1) {
+      items.push({
+        type: "image",
+        answerPart: part,
+        choices: imageChoices
+      });
+    }
+  }
+
+  return items;
 }
+
+
 
 function formatNumericAnswer(answer) {
   const str = String(answer);
@@ -208,26 +242,20 @@ function formatNumericAnswer(answer) {
    return matches || [];
 }
 
-function getImageAnswerChoices() {
-  return [...document.querySelectorAll('div[role="button"]')].filter((div) =>
-    div.querySelector("img")
+function getImageAnswerChoices(answerPart) {
+  return [
+    ...answerPart.querySelectorAll('div[role="button"]')
+  ].filter(choice => choice.querySelector("img"));
+}
+
+
+
+function getImageChoiceCaptureRoot(answerPart) {
+  return (
+    answerPart.closest("div[class*='AnswerPart']") ??
+    answerPart.closest("div[class*='AnswerScreen']") ??
+    answerPart
   );
-}
-
-function isImageChoiceAnswer() {
-  const choices = getImageAnswerChoices();
-  console.log("[SparxSolver] isImageChoiceAnswer =", choices.length > 1);
-  return choices.length > 1;
-}
-
-function getImageChoiceCaptureRoot(choices) {
-  const answerPart = choices[0]?.closest("div[class*='AnswerPart']");
-  if (answerPart) return answerPart;
-
-  const answerScreen = choices[0]?.closest("div[class*='AnswerScreen']");
-  if (answerScreen) return answerScreen;
-
-  return choices[0]?.parentElement || document.body;
 }
 
 function addImageChoiceNumberBadges(choices) {
@@ -283,15 +311,15 @@ function ensureHtml2CanvasLoaded() {
   });
 }
 
-async function captureImageChoiceArea() {
-  const choices = getImageAnswerChoices();
+async function captureImageChoiceArea(answerPart) {
+  const choices = getImageAnswerChoices(answerPart);
   if (choices.length < 2) {
     throw new Error("Image answer choices not found.");
   }
 
   await ensureHtml2CanvasLoaded();
 
-  const captureRoot = getImageChoiceCaptureRoot(choices);
+  const captureRoot = getImageChoiceCaptureRoot(answerPart);
   const removeBadges = addImageChoiceNumberBadges(choices);
   const replaced = typeof replaceInputsWithSpans === "function"
     ? replaceInputsWithSpans(captureRoot)
@@ -360,32 +388,27 @@ function selectImageAnswerChoiceMock(index) {
   return false;
 }
 
-function selectImageAnswerChoice(index) {
-  const normalizedIndex = Number(index);
-  const choices = getImageAnswerChoices();
-  const targetChoice = choices[normalizedIndex - 1];
+function selectImageAnswerChoice(answerPart, index) {
+  const choices = getImageAnswerChoices(answerPart);
 
-  if (targetChoice) {
-    targetChoice.click();
-    console.log(
-      `[SparxSolver] Clicked image answer choice ${normalizedIndex} on the live page.`
-    );
-    return true;
+  const target = choices[index - 1];
+
+  if (!target) {
+    console.log("Image choice not found:", index);
+    return false;
   }
 
-  if (window.__sparxSolverMockSelectionEnabled === true) {
-    return selectImageAnswerChoiceMock(index);
-  }
+  target.click();
 
   console.log(
-    "[SparxSolver] Could not find the requested image answer choice to click:",
-    index
+    `[SparxSolver] Clicked image choice ${index}.`
   );
-  return false;
+
+  return true;
 }
 
-async function recognizeImageChoiceAnswer(finalAnswer) {
-  const { imageDataUrl, choiceCount } = await captureImageChoiceArea();
+async function recognizeImageChoiceAnswer(answerPart, finalAnswer) {
+  const { imageDataUrl, choiceCount } = await captureImageChoiceArea(answerPart);
   const { choiceIndex, rawText } = await chooseImageAnswer(
     finalAnswer,
     imageDataUrl,
@@ -398,19 +421,33 @@ async function recognizeImageChoiceAnswer(finalAnswer) {
   });
 
   console.log(`[SparxSolver] Recommended image answer choice: ${choiceIndex}`);
-  selectImageAnswerChoice(choiceIndex);
+  selectImageAnswerChoice(answerPart, choiceIndex);
   return { recognizedOnly: false, choiceIndex };
 }
 
-function getNumericAnswerInputs() {
-  return [...document.querySelectorAll("input[class*='TextFieldNumeric']")];
+async function clickIntoInput(input) {
+  input.click();
+  input.focus();
+  
+  // Simulate the full lifecycle of a mouse click
+  input.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  input.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+  console.log("click into input");
 }
 
 async function typeIntoNumericInput(input, value) {
-  input.click();
-  input.focus();
 
-  await sleep(100);
+
+  await clickIntoInput(input);
+
+  await sleep(500);
+
+  console.log("Target:", input.dataset.ref);
+  console.log("Active:", document.activeElement.dataset.ref);
+  console.log("Same?", document.activeElement === input);
 
   for (const key of String(value)) {
     let code;
@@ -448,52 +485,75 @@ async function typeIntoNumericInput(input, value) {
 
     await sleep(20);
   }
-}
-
-async function typeNumericAnswer(finalAnswer) {
-  const inputs = getNumericAnswerInputs();
-
-  if (!inputs.length) {
-    console.error("[SparxSolver] Numeric input not found.");
-    return false;
-  }
-
-  const matches = formatNumericAnswer(finalAnswer);
-  const valuesToType = matches.slice(-inputs.length);
-
-  if (!valuesToType.length) {
-    console.error("[SparxSolver] No numeric values found for answer.");
-    return false;
-  }
 
   console.log(
-    `[SparxSolver] Found ${inputs.length} numeric input(s); typing values:`,
-    valuesToType
-  );
+  "After typing:",
+  input.dataset.ref,
+  "value =",
+  input.value
+);
+}
 
-  for (let i = 0; i < inputs.length; i += 1) {
-    const input = inputs[i];
-    const value = valuesToType[i];
-    if (!value) {
-      break;
-    }
-    await typeIntoNumericInput(input, value);
+async function typeNumericInput(input, value) {
+  if (value == null) {
+    return;
   }
-
-  return true;
+  console.log("Typing", value, input);
+  await typeIntoNumericInput(input, value);
+  
 }
 
 async function typeAnswer(finalAnswer) {
-  if (isImageChoiceAnswer()) {
-    return await recognizeImageChoiceAnswer(finalAnswer);
+  const answerItems = getOrderedAnswerItems();
+  console.log(answerItems);
+
+  if (!answerItems.length) {
+    console.error("[SparxSolver] No answer items found.");
+    return false;
   }
 
-  if (isNumericAnswer()) {
-    return await typeNumericAnswer(finalAnswer);
+  const numericValues = formatNumericAnswer(finalAnswer);
+
+  let numericIndex = 0;
+
+  for (const item of answerItems) {
+    switch (item.type) {
+      case "numeric": {
+        const value = numericValues[numericIndex++];
+
+        if (value == null) {
+          console.warn(
+            "[SparxSolver] Missing numeric value."
+          );
+          continue;
+        }
+
+        await typeNumericInput(
+          item.input,
+          value
+        );
+
+        break;
+      }
+
+      case "image": {
+        await recognizeImageChoiceAnswer(
+          item.answerPart,
+          finalAnswer
+        );
+
+        break;
+      }
+
+      default:
+        console.warn(
+          "[SparxSolver] Unknown answer item:",
+          item
+        );
+    }
   }
 
-  console.error("[SparxSolver] Unsupported answer type.");
-  return false;
+  return true;
 }
 
 function waitForSubmitButton(timeout = 10000, interval = 100) {
