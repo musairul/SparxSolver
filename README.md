@@ -1,13 +1,14 @@
 # 🧮 SparxSolver - AI Math Problem Solver
 
-A powerful Chrome extension that uses AI to solve Sparx Maths problems and store bookworks. This extension leverages AI to provide detailed step-by-step solutions and explanations for mathematical problems.
+A powerful Chrome extension that uses AI to **automatically** solve Sparx Maths problems and store bookworks. This extension leverages AI to provide detailed step-by-step solutions and explanations for mathematical problems.
 
 ## ✨ Features
 
+- **🆕 Auto Solve and Auto Bookwork**: Fully automates question answering and bookwork checks -- completely hands free
 - **🤖 AI-Powered Math Solving**: Uses AI to analyze and solve complex math problems
 - **📚 Saves Bookworks**: Save and organize solved problems for future reference
 - **🔍 Step-by-Step Solutions**: Get detailed explanations with mathematical reasoning
-- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 2.5 Flash and Mistral Medium to deliver fast and accurate responses.
+- **⚡ Blazing Fast**: Faster than Gauth, utilising Gemini 3.5 Flash to deliver fast and accurate responses.
 - **🖼️ LaTeX Rendering**: Beautiful mathematical notation using KaTeX
 - **📸 Screenshot Analysis**: Automatically captures screenshots of math problems from Sparx Learning, even if the question is obscured (no need to zoom out!)
 
@@ -96,6 +97,8 @@ _SparxSolver completes bookwork checks_
 - **Extension popup doesn't open**:
     - Make sure you are on the `maths.sparx-learning.com` website, as the extension is designed to activate only on this domain.
     - Refresh the page and click on the extension again
+- **Auto Solve and Auto Bookwork isnt working**:
+   - This feature is brand new and quite buggy. It wont work on all question types. Please create detailed issues for any bugs you may find.
 
 ## ⚠️ Disclaimer
 
