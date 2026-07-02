@@ -271,6 +271,15 @@ document.addEventListener("DOMContentLoaded", function () {
       setSolveButtonAutoState(false);
       sendHeightToParent();
     }
+    else if (request.action === "triggerPopupSolvePipeline") {
+      console.log("[SparxSolver] Background loop heartbeat acknowledged. Initiating automated solve iteration...");
+      
+      // Execute your native automated solve sequence directly
+      runAutoSolveOnce();
+      
+      if (sendResponse) sendResponse({ status: "Popup automated sequence executing" });
+      return true;
+    }
   });
 
   loadAutoSettings();

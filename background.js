@@ -40,10 +40,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     captureAndProcessScreenshot(sendResponse);
     return true;
   }
+  
+  // This block safely routes BOTH normal image questions AND your new bookwork flow
   if (request.action === "chooseImageAnswer") {
     chooseImageAnswer(request, sendResponse);
     return true;
   }
+  
   if (request.action === "saveBookwork") {
     if (request.code && request.url) {
       chrome.storage.local.get("bookworks", (data) => {
@@ -55,6 +58,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
     }
+    return true;
+  }
+
+  // --- CORRECT ARCHITECTURE: Relay the loop trigger directly to your UI Extension Popup ---
+  if (request.action === "requestNextAnswer") {
+    console.log("[Background] Auto-solve loop verified active. Relaying initialization command to Popup UI...");
+    chrome.runtime.sendMessage({ action: "triggerPopupSolvePipeline" });
+    sendResponse({ status: "Relay sequence engaged" });
     return true;
   }
 });
@@ -125,18 +136,48 @@ async function getProviderSettings() {
 
 async function chooseImageAnswer(request, sendResponse) {
   try {
-    const { finalAnswer, imageDataUrl, choiceCount } = request;
+    const { finalAnswer, imageDataUrl, choiceCount, isBookwork } = request;
     if (!finalAnswer || !imageDataUrl || !choiceCount) {
       sendResponse({
-        error: "Missing final answer, image data, or choice count for image answer selection.",
+        error: "Missing parameters for image answer selection.",
       });
       return;
     }
 
     const { apiKey, providerConfig, modelsToTry } = await getProviderSettings();
-    const prompt =
-      `Given this final answer and the image of numbered choices, return only the number of the image that best fits the answer. ` +
-      `Images are numbered from 1 in their current order. There are ${choiceCount} images. Final answer: ${finalAnswer}`;
+    
+    let prompt = "";
+    let messagesContent = [];
+
+    if (isBookwork === true) {
+      prompt = `You are performing a bookwork check verification. Look closely at the two images provided below:\n` +
+               `Image 1 is the CORRECT reference answer.\n` +
+               `Image 2 contains all the numbered options (numbered 1 to ${choiceCount}).\n\n` +
+               `Task: Find which option in Image 2 exactly matches the reference solution in Image 1. Return ONLY the integer number of the matching option. Do not include any other text.`;
+
+      messagesContent = [
+        { type: "text", text: prompt },
+        {
+          type: "image_url",
+          image_url: { url: finalAnswer },
+        },
+        {
+          type: "image_url",
+          image_url: { url: imageDataUrl },
+        }
+      ];
+    } else {
+      prompt = `Given this final answer and the image of numbered choices, return only the number of the image that best fits the answer. ` +
+               `Images are numbered from 1 in their current order. There are ${choiceCount} images.  ${finalAnswer}`;
+      
+      messagesContent = [
+        { type: "text", text: prompt },
+        {
+          type: "image_url",
+          image_url: { url: imageDataUrl },
+        }
+      ];
+    }
 
     let response = null;
     let fetchError = null;
@@ -147,20 +188,27 @@ async function chooseImageAnswer(request, sendResponse) {
         messages: [
           {
             role: "user",
-            content: [
-              { type: "text", text: prompt },
-              {
-                type: "image_url",
-                image_url: {
-                  url: imageDataUrl,
-                },
-              },
-            ],
+            content: messagesContent,
           },
         ],
         max_tokens: 100,
         temperature: 0,
       };
+
+      // ---- DETAILED INSPECTION LOGS ----
+      console.log("%c[SparxSolver LLM Outbound Payload]", "color: #00ffcc; font-weight: bold;");
+      console.log("Target Model:", modelToTry);
+      console.log("Prompt Instructions:", prompt);
+      
+      if (isBookwork) {
+        console.log("Image 1 (Reference Answer URL):", finalAnswer);
+        // This log makes the massive base64 string a cleanly formatted, collapsible object item in DevTools
+        console.log("Image 2 (Choices Grid Base64):", { dataUrl: imageDataUrl });
+      } else {
+        console.log("Target Solution Text:", finalAnswer);
+        console.log("Choices Grid Base64:", { dataUrl: imageDataUrl });
+      }
+      // ----------------------------------
 
       try {
         const res = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
@@ -178,37 +226,28 @@ async function chooseImageAnswer(request, sendResponse) {
         }
 
         response = res;
-        console.warn(
-          `[SparxSolver] Image answer model ${modelToTry} failed with status ${res.status}. Falling back if available...`
-        );
+        console.warn(`[SparxSolver] Model ${modelToTry} failed with status ${res.status}.`);
       } catch (err) {
         fetchError = err;
-        console.warn(`[SparxSolver] Image answer model ${modelToTry} fetch error:`, err);
+        console.warn(`[SparxSolver] Model ${modelToTry} fetch error:`, err);
       }
     }
 
-    if (fetchError && !response) {
-      throw fetchError;
-    }
+    if (fetchError && !response) throw fetchError;
 
     if (!response || !response.ok) {
       const status = response ? response.status : 0;
-      const statusText = response ? response.statusText : "";
-      sendResponse({
-        error: `Image answer request failed: ${status} ${statusText} from ${providerConfig.name}.`,
-      });
+      sendResponse({ error: `Image answer request failed with status ${status}` });
       return;
     }
 
     const responseData = await response.json();
-    const rawText = extractProviderTextContent(
-      responseData.choices?.[0]?.message?.content
-    );
+    const rawText = extractProviderTextContent(responseData.choices?.[0]?.message?.content);
     const choiceIndex = extractImageChoiceIndex(rawText, choiceCount);
 
     if (choiceIndex === null || choiceIndex === undefined) {
       sendResponse({
-        error: `Could not extract a valid image choice number from provider response: ${rawText}`,
+        error: `Could not extract choice index from response: ${rawText}`,
         rawText,
       });
       return;
@@ -217,9 +256,7 @@ async function chooseImageAnswer(request, sendResponse) {
     sendResponse({ rawText, choiceIndex });
   } catch (error) {
     console.error("[SparxSolver] Image answer selection failed:", error);
-    sendResponse({
-      error: error.message || "Unknown image answer selection error.",
-    });
+    sendResponse({ error: error.message || "Selection error." });
   }
 }
 
@@ -717,6 +754,10 @@ async function checkUrlForWac(tabId, url) {
     sendMessageToContentScript(); // Initial attempt
   }
 }
+
+
+
+
 
 // Listener for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {

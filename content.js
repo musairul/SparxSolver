@@ -195,11 +195,21 @@ function clickAnswerButton() {
 }
 
 function getOrderedAnswerItems() {
-  const answerParts = [
+  let answerParts = [
     ...document.querySelectorAll("[class*='AnswerPart']")
   ];
 
   const items = [];
+
+  if (answerParts.length === 0) {
+    const mainContainer = document.querySelector("div[class*='QuestionWrapper']");
+    if (mainContainer) {
+      console.log("[SparxSolver] No AnswerPart elements found. Using main QuestionWrapper container.");
+      answerParts = [mainContainer];
+    }
+  }
+
+  console.log("answerParts", answerParts);
 
   for (const part of answerParts) {
     const numericInputs = [
@@ -215,6 +225,20 @@ function getOrderedAnswerItems() {
       }
     }
 
+    // Locate this section inside getOrderedAnswerItems() loop and append the multiple-choice check:
+
+    const multipleChoiceButtons = [
+      ...part.querySelectorAll('div[role="button"]')
+    ].filter(choice => !choice.querySelector("img")); // Filter OUT items that contain images
+
+    if (multipleChoiceButtons.length > 0) {
+      items.push({
+        type: "multiple-choice",
+        answerPart: part,
+        choices: multipleChoiceButtons
+      });
+    }
+
     const imageChoices = [
       ...part.querySelectorAll('div[role="button"]')
     ].filter(choice => choice.querySelector("img"));
@@ -226,11 +250,310 @@ function getOrderedAnswerItems() {
         choices: imageChoices
       });
     }
+
+    const inlineSlots = [
+      ...part.querySelectorAll("[class*='_CardContentEmpty_']")
+    ];
+
+    if (inlineSlots.length) {
+      for (const slot of inlineSlots) {
+        // Ensure we grab the outer clickable container div
+        const slotButton = slot.closest("[class*='_CardContentEmpty_']") || slot;
+        items.push({
+          type: "inline-slot",
+          slot: slotButton
+        });
+      }
+    }
+
   }
 
   return items;
 }
 
+/**
+ * Safely extracts clean text or raw LaTeX notation from a DOM element,
+ * prioritizing KaTeX source annotations over messy text concatenation.
+ */
+function extractChoiceText(choiceElement) {
+  // 1. Try to find KaTeX source annotation string (raw LaTeX format)
+  const annotation = choiceElement.querySelector('annotation[encoding="application/x-tex"]');
+  if (annotation) {
+    return annotation.textContent.trim();
+  }
+  
+  // 2. Fallback to just the rendered visual HTML block to avoid duplicate MathML text
+  const katexHtml = choiceElement.querySelector('.katex-html');
+  if (katexHtml) {
+    return katexHtml.textContent.trim();
+  }
+  
+  // 3. Standard plain text fallback
+  return choiceElement.textContent.trim();
+}
+
+/**
+ * Strips mathematical syntax noise (backslashes, braces, parentheses, spaces)
+ * to ensure that text-based variants and LaTeX tokens resolve to identical strings.
+ */
+function cleanMathText(text) {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .replace(/\\/g, "")          // Remove backslashes (\tan -> tan)
+    .replace(/[{}]/g, "")        // Remove grouping braces
+    .replace(/[()]/g, "")        // Remove parentheses
+    .replace(/\s+/g, "")         // Remove all whitespace
+    .trim();
+}
+
+/**
+ * Character crawler that advances through the stream and slices off the matched text,
+ * dynamically skipping formatting symbols and whitespace noise.
+ */
+function consumePhraseResilient(currentText, cleanChoiceText) {
+  if (!cleanChoiceText) return currentText;
+  
+  const cleanCurrent = cleanMathText(currentText);
+  const cleanMatchStart = cleanCurrent.indexOf(cleanChoiceText);
+  
+  if (cleanMatchStart === -1) return currentText; // Fallback safety
+  
+  let cleanIdx = 0;
+  let originalIdx = 0;
+  let currentCleanCount = 0;
+  
+  while (originalIdx < currentText.length && cleanIdx < cleanChoiceText.length) {
+    const origChar = currentText[originalIdx].toLowerCase();
+    
+    // Check if this character is one that cleanMathText keeps
+    const isKept = !/[\\{}\s()]/.test(origChar);
+    
+    if (isKept) {
+      if (currentCleanCount >= cleanMatchStart) {
+        if (origChar === cleanChoiceText[cleanIdx]) {
+          cleanIdx++;
+        } else {
+          cleanIdx = 0; // Reset progress if a segment breaks mid-evaluation
+        }
+      }
+      currentCleanCount++;
+    }
+    originalIdx++;
+  }
+  
+  return currentText.slice(originalIdx);
+}
+
+/**
+ * Handles the bookwork check flow by trying text-based matching via OCR first,
+ * and falling back to a numbered visual choice comparison if text matching fails.
+ */
+/**
+ * Handles the bookwork check flow by capturing a numbered screenshot of the 
+ * answer choices and passing it, along with the correct answer image URL,
+ * directly to the LLM Vision pipeline.
+ */
+
+/**
+ * Specialised bookwork screenshot tool that overlays numbers 
+ * and snaps the entire container element as one single image.
+ */
+
+
+async function handleBookworkCheck(imageUrl) {
+  console.log("[SparxSolver] Starting visual bookwork verification check...");
+
+  try {
+    // 1. Find all answer choices with class 'answer'
+    const answerDivs = Array.from(document.querySelectorAll("div.answer"));
+    if (!answerDivs.length) {
+      console.warn("[SparxSolver] No answer choices with class 'answer' found.");
+      return false;
+    }
+
+    // 2. Select the specific grid container containing the options
+    const choicesContainer = document.querySelector("div[class*='OptionsGrid']");
+    
+    console.log("[SparxSolver] Targeting container:", choicesContainer);
+
+    // 3. Capture the choices area using your working inline slot capture tool
+    console.log("[SparxSolver] Capturing numbered answer options...");
+    const { imageDataUrl, choiceCount } = await captureInlineSlotArea(choicesContainer, answerDivs);
+    
+    // 4. Pass the reference image and the complete grid screenshot over to the LLM listener
+    console.log("[SparxSolver] Invoking LLM Vision choice selection...");
+    const response = await chooseImageAnswer(
+      imageUrl,        // Reference answer image URL string
+      imageDataUrl,    // Single grid layout screenshot
+      choiceCount,     // Total items
+      true             // isBookwork explicit flag
+    );
+
+    const choiceIndex = response?.choiceIndex;
+
+    // 5. Click the matching option returned by the background engine
+    if (choiceIndex && choiceIndex > 0 && choiceIndex <= answerDivs.length) {
+      console.log(`[SparxSolver] LLM Vision selected bookwork option index: ${choiceIndex}`);
+      answerDivs[choiceIndex - 1].click();
+      await sleep(200);
+      return true;
+    }
+
+    //6. Click submit button
+    findSubmitButton()?.click();
+    await sleep(200);
+    findContinueLink()?.click();
+
+  } catch (error) {
+    console.error("[SparxSolver] Error during visual bookwork verification flow:", error);
+  }
+
+  return false;
+}
+
+// ---- NEW: Badge and capture functions for inline slots ----
+function addInlineSlotNumberBadges(choices) {
+  const badges = [];
+
+  choices.forEach((choice, index) => {
+    const previousPosition = choice.style.position;
+    if (window.getComputedStyle(choice).position === "static") {
+      choice.style.position = "relative";
+    }
+
+    const badge = document.createElement("div");
+    badge.textContent = String(index + 1);
+    badge.style.position = "absolute";
+    badge.style.top = "2px";
+    badge.style.left = "2px";
+    badge.style.zIndex = "999999";
+    badge.style.width = "10px";
+    badge.style.height = "10px";
+    badge.style.borderRadius = "50%";
+    badge.style.background = "#000"; 
+    badge.style.color = "#fff";
+    badge.style.fontSize = "8px";
+    badge.style.fontWeight = "bold";
+    badge.style.lineHeight = "10px";
+    badge.style.textAlign = "center";
+    badge.style.pointerEvents = "none";
+
+    choice.appendChild(badge);
+    badges.push({ badge, choice, previousPosition });
+  });
+
+  return () => {
+    badges.forEach(({ badge, choice, previousPosition }) => {
+      badge.remove();
+      choice.style.position = previousPosition;
+    });
+  };
+}
+
+async function captureInlineSlotArea(container, choices) {
+  await ensureHtml2CanvasLoaded();
+
+  const removeBadges = addInlineSlotNumberBadges(choices);
+
+  try {
+    const canvas = await window.html2canvas(container, {
+      scale: window.devicePixelRatio * 2,
+      scrollY: -window.scrollY,
+      useCORS: true,
+      allowTaint: true,
+    });
+    return {
+      imageDataUrl: canvas.toDataURL(),
+      choiceCount: choices.length,
+    };
+  } finally {
+    removeBadges();
+  }
+}
+
+
+async function handleInlineSlotAnswer(item, dynamicAnswer) {
+  console.log("[SparxSolver] Opening inline slot...");
+  
+  clickIntoInput(item.slot);
+  await sleep(300); // Wait for the dropdown container to generate
+
+  const optionsContainer = document.querySelector("[class*='_InlineSlotOptions_']");
+  if (!optionsContainer) {
+    console.error("[SparxSolver] Inline slot options container not found.");
+    return null;
+  }
+
+  const choices = [
+    ...optionsContainer.querySelectorAll("[class*='_CardContentClickable_']")
+  ];
+
+  if (!choices.length) {
+    console.error("[SparxSolver] No clickable options found inside the slot container.");
+    return null;
+  }
+
+  // Map choices into structured objects containing cleaned strings
+  const processedChoices = choices.map(choice => {
+    const rawText = extractChoiceText(choice);
+    return {
+      element: choice,
+      rawText: rawText,
+      cleanText: cleanMathText(rawText)
+    };
+  });
+
+  // Sort choices by clean text length descending to prioritize long expressions
+  processedChoices.sort((a, b) => b.cleanText.length - a.cleanText.length);
+
+  const normalizedAnswer = cleanMathText(dynamicAnswer);
+  let targetChoice = null;
+
+  for (const choice of processedChoices) {
+    if (choice.cleanText && normalizedAnswer.includes(choice.cleanText)) {
+      targetChoice = choice;
+      break;
+    }
+  }
+
+  if (targetChoice) {
+    console.log(`[SparxSolver] Selecting inline math option: "${targetChoice.rawText}"`);
+    targetChoice.element.click();
+    await sleep(200);
+    return targetChoice.cleanText; // Return clean representation to guide cutting engine
+  }
+
+  console.warn(`[SparxSolver] No math matching option found for text: "${dynamicAnswer}". Falling back to LLM Vision...`);
+  
+  // ---- NEW: LLM Fallback for Inline Slots ----
+  try {
+    const { imageDataUrl, choiceCount } = await captureInlineSlotArea(optionsContainer, choices);
+    
+    // We reuse chooseImageAnswer from the background script to handle the visual query
+    const { choiceIndex } = await chooseImageAnswer(
+      dynamicAnswer,
+      imageDataUrl,
+      choiceCount,
+      false
+    );
+
+    if (choiceIndex && choiceIndex > 0 && choiceIndex <= choices.length) {
+      const selectedChoice = choices[choiceIndex - 1];
+      console.log(`[SparxSolver] LLM Vision selected inline slot option index: ${choiceIndex}`);
+      
+      selectedChoice.click();
+      await sleep(200);
+      
+      // Return the cleanText from the selected element to properly chop the dynamicAnswer window
+      return cleanMathText(extractChoiceText(selectedChoice));
+    }
+  } catch (err) {
+    console.error("[SparxSolver] LLM fallback for inline slot failed:", err);
+  }
+
+  return null;
+}
 
 
 function formatNumericAnswer(answer) {
@@ -344,7 +667,7 @@ async function captureImageChoiceArea(answerPart) {
   }
 }
 
-function chooseImageAnswer(finalAnswer, imageDataUrl, choiceCount) {
+function chooseImageAnswer(finalAnswer, imageDataUrl, choiceCount, isBookwork = false) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
@@ -352,6 +675,7 @@ function chooseImageAnswer(finalAnswer, imageDataUrl, choiceCount) {
         finalAnswer,
         imageDataUrl,
         choiceCount,
+        isBookwork
       },
       (response) => {
         if (chrome.runtime.lastError) {
@@ -503,6 +827,99 @@ async function typeNumericInput(input, value) {
   
 }
 
+/**
+ * Searches for the first valid numeric token, extracts it, and crops the string from that point forward.
+ * @param {string} currentText - The remaining answer string window.
+ * @returns {object} An object containing the matched numeric 'value' and the updated 'remaining' text.
+ */
+function extractAndConsumeNumeric(currentText) {
+  const match = currentText.match(/(?<!\^)-?\d+(\.\d+)?(?!\w)/);
+  if (!match) {
+    return { value: null, remaining: currentText };
+  }
+
+  const value = match[0];
+  const sliceIndex = currentText.indexOf(value) + value.length;
+  
+  return {
+    value,
+    remaining: currentText.slice(sliceIndex)
+  };
+}
+
+async function handleMultipleChoiceAnswer(item, dynamicAnswer) {
+  console.log("[SparxSolver] Processing multiple choice answers...");
+
+  const choices = item.choices;
+  if (!choices.length) {
+    console.error("[SparxSolver] No multiple choice options found.");
+    return null;
+  }
+
+  // Map choices into structured objects containing cleaned strings
+  const processedChoices = choices.map(choice => {
+    const rawText = extractChoiceText(choice);
+    return {
+      element: choice,
+      rawText: rawText,
+      cleanText: cleanMathText(rawText)
+    };
+  });
+
+  // Sort choices by clean text length descending to prioritize longer expressions
+  processedChoices.sort((a, b) => b.cleanText.length - a.cleanText.length);
+
+  const normalizedAnswer = cleanMathText(dynamicAnswer);
+  let targetChoice = null;
+
+  for (const choice of processedChoices) {
+    if (choice.cleanText && normalizedAnswer.includes(choice.cleanText)) {
+      targetChoice = choice;
+      break;
+    }
+  }
+
+  if (targetChoice) {
+    console.log(`[SparxSolver] Selecting matching text option: "${targetChoice.rawText}"`);
+    targetChoice.element.click();
+    await sleep(200);
+    return targetChoice.cleanText; // Return clean representation to guide cutting engine
+  }
+
+  console.warn(`[SparxSolver] No text matching option found for: "${dynamicAnswer}". Falling back to LLM Vision...`);
+
+  // ---- LLM Fallback for Multiple Choice ----
+  try {
+    // Reusing captureInlineSlotArea as it handles standard element container snapshots
+    const { imageDataUrl, choiceCount } = await captureInlineSlotArea(item.answerPart, choices);
+    
+    // Send the vision payload to your background engine
+    const { choiceIndex } = await chooseImageAnswer(
+      dynamicAnswer,
+      imageDataUrl,
+      choiceCount,
+      false
+    );
+
+    if (choiceIndex && choiceIndex > 0 && choiceIndex <= choices.length) {
+      const selectedChoice = choices[choiceIndex - 1];
+      console.log(`[SparxSolver] LLM Vision selected option index: ${choiceIndex}`);
+      
+      selectedChoice.click();
+      await sleep(200);
+      
+      // Return cleanText from the selected element to properly slice the remaining stream
+      return cleanMathText(extractChoiceText(selectedChoice));
+    }
+  } catch (err) {
+    console.error("[SparxSolver] LLM fallback for multiple choice failed:", err);
+  }
+
+  return null;
+}
+
+
+
 async function typeAnswer(finalAnswer) {
   const answerItems = getOrderedAnswerItems();
   console.log(answerItems);
@@ -512,44 +929,58 @@ async function typeAnswer(finalAnswer) {
     return false;
   }
 
-  const numericValues = formatNumericAnswer(finalAnswer);
-
-  let numericIndex = 0;
+  let dynamicAnswer = finalAnswer;
 
   for (const item of answerItems) {
     switch (item.type) {
       case "numeric": {
-        const value = numericValues[numericIndex++];
+        const { value, remaining } = extractAndConsumeNumeric(dynamicAnswer);
 
-        if (value == null) {
-          console.warn(
-            "[SparxSolver] Missing numeric value."
-          );
+        if (!value) {
+          console.warn("[SparxSolver] Missing numeric value in remaining text:", dynamicAnswer);
           continue;
         }
 
-        await typeNumericInput(
-          item.input,
-          value
-        );
+        await typeNumericInput(item.input, value);
+        dynamicAnswer = remaining;
+        console.log("[SparxSolver] Consumed numeric value. Remaining window:", dynamicAnswer);
+        break;
+      }
 
+      // Locate the switch (item.type) block inside typeAnswer() and add this case:
+
+      case "multiple-choice": {
+        const matchedCleanText = await handleMultipleChoiceAnswer(item, dynamicAnswer);
+        if (!matchedCleanText) {
+          return false; // Safely abort sequence if mismatch breaks execution
+        }
+
+        // Chop the remaining answer string window cleanly using your crawler
+        dynamicAnswer = consumePhraseResilient(dynamicAnswer, matchedCleanText);
+        console.log("[SparxSolver] Consumed multiple choice phrase. Remaining window:", dynamicAnswer);
         break;
       }
 
       case "image": {
-        await recognizeImageChoiceAnswer(
-          item.answerPart,
-          finalAnswer
-        );
+        await recognizeImageChoiceAnswer(item.answerPart, finalAnswer);
+        break;
+      }
 
+      case "inline-slot": {
+        // Pass dynamicAnswer window to the matching engine
+        const matchedCleanText = await handleInlineSlotAnswer(item, dynamicAnswer);
+        if (!matchedCleanText) {
+          return false; // Safely abort sequence if mismatch breaks execution
+        }
+
+        // Use the character crawler to chop the string forward cleanly
+        dynamicAnswer = consumePhraseResilient(dynamicAnswer, matchedCleanText);
+        console.log("[SparxSolver] Consumed slot phrase. Remaining window:", dynamicAnswer);
         break;
       }
 
       default:
-        console.warn(
-          "[SparxSolver] Unknown answer item:",
-          item
-        );
+        console.warn("[SparxSolver] Unknown answer item:", item);
     }
   }
 
@@ -637,6 +1068,17 @@ function findContinueLink() {
   ) || null;
 }
 
+function findKeepGoingLink() {
+  const targetAnchor = Array.from(document.querySelectorAll('a')).find(anchor => {
+    const div = anchor.querySelector('div');
+    return div && div.textContent.trim().toLowerCase() === 'keep going';
+  });
+
+  console.log(targetAnchor);
+  return targetAnchor; // Added this so the function outputs the result
+}
+
+
 function disableAutoSolveAfterFailure() {
   chrome.storage.local.set({ autoSolveEnabled: false }, () => {
     chrome.runtime.sendMessage({ action: "autoSolveDisabled" });
@@ -649,6 +1091,16 @@ function handleAutoSolveFailure() {
   disableAutoSolveAfterFailure();
   alert("Auto solve failed");
 }
+
+// Requesting the next solve cycle from background engine
+  function requestNextAnswerIfEnabled() {
+    chrome.storage.local.get("autoSolveEnabled", (data) => {
+      if (data.autoSolveEnabled) {
+        console.log("[SparxSolver] Loop verified active. Requesting next answer parameters...");
+        chrome.runtime.sendMessage({ action: "requestNextAnswer" });
+      }
+    });
+  }
 
 async function runAutoSolvePageFlow(finalAnswer) {
   console.log("[SparxSolver] Auto solve answer ready:", finalAnswer);
@@ -689,7 +1141,7 @@ async function runAutoSolvePageFlow(finalAnswer) {
     return;
   }
 
-  await sleep(1500);
+  await sleep(1000);
 
   console.log("[SparxSolver] Waiting for Continue link...");
 
@@ -703,6 +1155,17 @@ async function runAutoSolvePageFlow(finalAnswer) {
   console.log("[SparxSolver] Continue link found.");
 
   continueLink.click();
+
+  //now it should repeat as long as the autoSolveEnabled toggle is still on, and the next page has a new answer to solve
+
+  console.log("[SparxSolver] Navigating to the next task screen...");
+
+  // Wait for transition, then check for next question
+  await sleep(1000);
+  requestNextAnswerIfEnabled();
+
+
+
 }
 
   const IFRAME_ID = "sparx-solver-iframe";
@@ -758,19 +1221,14 @@ async function runAutoSolvePageFlow(finalAnswer) {
     (async () => {
       try {
         await runAutoSolvePageFlow(request.finalAnswer);
-
-        sendResponse({
-          status: "Auto solve completed"
-        });
+        sendResponse({ status: "Auto solve completed" });
       } catch (err) {
         console.error("[SparxSolver] Auto solve failed:", err);
-
-        sendResponse({
-          status: "Auto solve failed",
-          error: err.message
-        });
+        handleAutoSolveFailure();
+        sendResponse({ error: err.message });
       }
     })();
+    return true; // Keep message channel open for async execution
   }
 
   else if (request.action === "enablePointerEvents") {
@@ -785,9 +1243,38 @@ async function runAutoSolvePageFlow(finalAnswer) {
         status: "Pointer events enabled with !important after delay",
       });
 
-      // ---- BOOKWORK CHECK LOGIC ----
       findAndDisplayBookworkAnswer();
-      // ---- END BOOKWORK CHECK LOGIC ----
+
+      // 2. Fetch storage to check if the automated solving flow should proceed
+      chrome.storage.local.get(["autoSolveEnabled", "bookworks"], async (data) => {
+      if (!data.autoSolveEnabled) {
+        console.log("[SparxSolver] Auto bookwork/solve toggle is OFF. Automated selection skipped.");
+        return;
+      }
+
+      console.log("[SparxSolver] Auto toggle is ON. Proceeding with automated verification...");
+
+      const bookworkElements = Array.from(document.querySelectorAll("*")).filter((el) => {
+        const text = el.textContent || "";
+        return text.includes("Bookwork") && !Array.from(el.children).some(c => c.textContent?.includes("Bookwork"));
+      });
+
+      const bookworkCheckElement = bookworkElements.find(el => (el.textContent || "").trim().includes("Bookwork check"));
+      const bookworkCodeElements = bookworkElements.filter(el => el !== bookworkCheckElement);
+
+      if (bookworkCodeElements.length > 0) {
+        const fullText = (bookworkCodeElements[0].textContent || "").trim();
+        const bookworkCode = fullText.replace("Bookwork", "").trim();
+
+        if (bookworkCode && data.bookworks && data.bookworks[bookworkCode]) {
+          const imageUrl = data.bookworks[bookworkCode];
+          
+          // Execute the automated OCR + Vision fallback pipeline
+          await handleBookworkCheck(imageUrl);
+        }
+      }
+    });
+
     }, 2000);
   }
 
