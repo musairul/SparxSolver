@@ -400,11 +400,6 @@ async function handleBookworkCheck(imageUrl) {
       return true;
     }
 
-    //6. Click submit button
-    findSubmitButton()?.click();
-    await sleep(200);
-    findContinueLink()?.click();
-
   } catch (error) {
     console.error("[SparxSolver] Error during visual bookwork verification flow:", error);
   }
@@ -994,7 +989,7 @@ function waitForSubmitButton(timeout = 10000, interval = 100) {
     const start = Date.now();
 
     const timer = setInterval(() => {
-      const btn = findSubmitButton();
+      const btn = findButtonWithNestedText('submit');
 
       if (btn) {
         clearInterval(timer);
@@ -1011,11 +1006,11 @@ function waitForSubmitButton(timeout = 10000, interval = 100) {
   });
 }
 
-function findSubmitButton() {
-  console.log("[SparxSolver] Finding Submit button...");
+function findButtonWithNestedText(text) {
+  console.log(`[SparxSolver] Finding, ${text}, button...`);
 
   return [...document.querySelectorAll("button")].find(button =>
-    button.textContent.trim().toLowerCase().startsWith("submit")
+    button.textContent.trim().toLowerCase().startsWith(text.toLowerCase())
   ) || null;
 }
 
@@ -1210,6 +1205,52 @@ async function runAutoSolvePageFlow(finalAnswer) {
     );
   }
 
+  async function runAutoBookworkSequence() {
+  chrome.storage.local.get(["autoBookworkEnabled", "bookworks"], async (data) => {
+    if (!data.autoBookworkEnabled) {
+      console.log("[SparxSolver] Auto bookwork toggle is OFF. Skipping automated run.");
+      return;
+    }
+
+    // Check if we are actually on a "Bookwork check" page to avoid running prematurely
+    const isBookworkPage = Array.from(document.querySelectorAll("*")).some(el => 
+      (el.textContent || "").trim().toLowerCase().includes("bookwork check")
+    );
+
+    if (!isBookworkPage) {
+      console.log("[SparxSolver] Not currently on a Bookwork check screen.");
+      return;
+    }
+
+    console.log("[SparxSolver] Bookwork page detected. Proceeding with automated verification...");
+
+    const bookworkElements = Array.from(document.querySelectorAll("*")).filter((el) => {
+      const text = el.textContent || "";
+      return text.includes("Bookwork") && !Array.from(el.children).some(c => c.textContent?.includes("Bookwork"));
+    });
+
+    const bookworkCheckElement = bookworkElements.find(el => (el.textContent || "").trim().includes("Bookwork check"));
+    const bookworkCodeElements = bookworkElements.filter(el => el !== bookworkCheckElement);
+
+    if (bookworkCodeElements.length > 0) {
+      const fullText = (bookworkCodeElements[0].textContent || "").trim();
+      const bookworkCode = fullText.replace("Bookwork", "").trim();
+
+      if (bookworkCode && data.bookworks && data.bookworks[bookworkCode]) {
+        const imageUrl = data.bookworks[bookworkCode];
+        // Execute the automated OCR + Vision fallback pipeline
+        await handleBookworkCheck(imageUrl);
+
+        //6. Click submit button
+        await sleep(200);
+        findButtonWithNestedText('submit')?.click();
+        await sleep(500);
+        findButtonWithNestedText('continue')?.click();
+      }
+    }
+  });
+}
+
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "toggle_ui") {
     console.log("[SparxSolver] Toggle UI message received.");
@@ -1232,48 +1273,21 @@ async function runAutoSolvePageFlow(finalAnswer) {
   }
 
   else if (request.action === "enablePointerEvents") {
-    setTimeout(() => {
-      document.body.style.setProperty("pointer-events", "all", "important");
+  setTimeout(() => {
+    document.body.style.setProperty("pointer-events", "all", "important");
 
-      console.log(
-        "[SparxSolver] Pointer events enabled on body with !important after 2000ms delay."
-      );
+    console.log(
+      "[SparxSolver] Pointer events enabled on body with !important after 2000ms delay."
+    );
 
-      sendResponse({
-        status: "Pointer events enabled with !important after delay",
-      });
-
-      findAndDisplayBookworkAnswer();
-
-      // 2. Fetch storage to check if the automated solving flow should proceed
-      chrome.storage.local.get(["autoSolveEnabled", "bookworks"], async (data) => {
-      if (!data.autoSolveEnabled) {
-        console.log("[SparxSolver] Auto bookwork/solve toggle is OFF. Automated selection skipped.");
-        return;
-      }
-
-      console.log("[SparxSolver] Auto toggle is ON. Proceeding with automated verification...");
-
-      const bookworkElements = Array.from(document.querySelectorAll("*")).filter((el) => {
-        const text = el.textContent || "";
-        return text.includes("Bookwork") && !Array.from(el.children).some(c => c.textContent?.includes("Bookwork"));
-      });
-
-      const bookworkCheckElement = bookworkElements.find(el => (el.textContent || "").trim().includes("Bookwork check"));
-      const bookworkCodeElements = bookworkElements.filter(el => el !== bookworkCheckElement);
-
-      if (bookworkCodeElements.length > 0) {
-        const fullText = (bookworkCodeElements[0].textContent || "").trim();
-        const bookworkCode = fullText.replace("Bookwork", "").trim();
-
-        if (bookworkCode && data.bookworks && data.bookworks[bookworkCode]) {
-          const imageUrl = data.bookworks[bookworkCode];
-          
-          // Execute the automated OCR + Vision fallback pipeline
-          await handleBookworkCheck(imageUrl);
-        }
-      }
+    sendResponse({
+      status: "Pointer events enabled with !important after delay",
     });
+
+    findAndDisplayBookworkAnswer();
+
+    // Call the shared runner on load
+    runAutoBookworkSequence();
 
     }, 2000);
   }
@@ -1310,7 +1324,18 @@ async function runAutoSolvePageFlow(finalAnswer) {
   });
 
   // Add this near the bottom of content.js where your event listeners live
-
+  // Add this near the bottom of content.js
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.autoBookworkEnabled) {
+    const isBookworkEnabled = changes.autoBookworkEnabled.newValue;
+    console.log(`[SparxSolver] Auto-Bookwork toggle turned ${isBookworkEnabled ? "ON" : "OFF"}`);
+    
+    // If turned ON, dynamically kick off the sequence right now
+    if (isBookworkEnabled) {
+      runAutoBookworkSequence();
+    }
+  }
+});
 
 
   // Listen for screenshot request from background.js
