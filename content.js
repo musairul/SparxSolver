@@ -1309,6 +1309,10 @@ async function runAutoSolvePageFlow(finalAnswer) {
     }
   });
 
+  // Add this near the bottom of content.js where your event listeners live
+
+
+
   // Listen for screenshot request from background.js
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "captureQuestionScreenshot") {
