@@ -160,7 +160,7 @@ async function waitForContinue(timeout = 5000, interval = 100) {
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
-    const continueLink = findContinueLink();
+    const continueLink = findLinkWithNestedText('continue');
 
     if (continueLink) {
       return continueLink;
@@ -1026,14 +1026,14 @@ function clickSubmitButton(button) {
   return true;
 }
 
-function waitForContinueLink(timeout = 10000, interval = 500) {
+function waitForContinueLink(timeout = 5000, interval = 500) {
   console.log("[SparxSolver] Waiting for Continue link...");
 
   return new Promise((resolve) => {
     const start = Date.now();
 
     const timer = setInterval(() => {
-      const link = findContinueLink();
+      const link = findLinkWithNestedText('continue');
 
       if (link) {
         const pointerEvents = window.getComputedStyle(link).pointerEvents;
@@ -1055,11 +1055,11 @@ function waitForContinueLink(timeout = 10000, interval = 500) {
   });
 }
 
-function findContinueLink() {
-  console.log("[SparxSolver] Finding Continue link...");
+function findLinkWithNestedText(text) {
+  console.log(`[SparxSolver] Finding, ${text}, link...`);
 
   return [...document.querySelectorAll("a")].find(link =>
-    link.textContent.trim().toLowerCase() === "continue"
+    link.textContent.trim().toLowerCase() === text.toLowerCase()
   ) || null;
 }
 
@@ -1100,6 +1100,15 @@ function handleAutoSolveFailure() {
 async function runAutoSolvePageFlow(finalAnswer) {
   console.log("[SparxSolver] Auto solve answer ready:", finalAnswer);
 
+  const isBookworkCheckPage = Array.from(document.querySelectorAll("*")).some(el => {
+    return (el.textContent || "").trim().toLowerCase().includes("bookwork check");
+  });
+
+  if (isBookworkCheckPage) {
+    console.log("[SparxSolver] Bookwork check detected. Standard auto-solve is pausing until this screen clears.");
+    return false; // Exit safely, doing nothing
+  }
+
   // Click the Answer button
   if (!clickAnswerButton()) {
     handleAutoSolveFailure();
@@ -1137,6 +1146,14 @@ async function runAutoSolvePageFlow(finalAnswer) {
   }
 
   await sleep(1000);
+
+  const tryAgainLink = findLinkWithNestedText('try again');
+
+  if (tryAgainLink) {
+    console.error("[SparxSolver] Submission failed. 'Try Again' link detected.");
+    handleAutoSolveFailure();
+    return;
+  }
 
   console.log("[SparxSolver] Waiting for Continue link...");
 
