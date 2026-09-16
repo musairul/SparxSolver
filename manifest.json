@@ -36,9 +36,6 @@
         "bookwork.js",
         "content.js"
       ],
-      "css": [
-        "popup.css"
-      ],
       "run_at": "document_idle"
     }
   ],

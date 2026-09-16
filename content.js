@@ -10,77 +10,82 @@
 
   console.log("[SparxSolver] Content script loaded.");
 
+  function extractBookworkCodeFromText(text) {
+    const match = String(text || "")
+      .trim()
+      .match(/(?:^|\b)Bookwork(?:\s+code:)?\s+([0-9]+[A-Za-z]+)\b/i);
+
+    return match ? match[1] : null;
+  }
+
+  function findCurrentBookworkChip() {
+    const classMatchedChip = Array.from(document.querySelectorAll("div[class*='Bookwork']")).find((element) => {
+      const text = (element.textContent || "").trim();
+      return /^Bookwork\s+[0-9]+[A-Za-z]+$/i.test(text);
+    });
+
+    if (classMatchedChip) {
+      return classMatchedChip;
+    }
+
+    return Array.from(document.querySelectorAll("div")).find((element) => {
+      const text = (element.textContent || "").trim();
+      if (!/^Bookwork\s+[0-9]+[A-Za-z]+$/i.test(text)) {
+        return false;
+      }
+
+      return !Array.from(element.children).some((child) =>
+        /Bookwork/i.test(child.textContent || "")
+      );
+    }) || null;
+  }
+
+  function findCurrentBookworkCode() {
+    const chip = findCurrentBookworkChip();
+    const chipCode = extractBookworkCodeFromText(chip?.textContent);
+
+    if (chipCode) {
+      console.log(`[SparxSolver] Found bookwork code from chip: ${chipCode}`);
+      return { code: chipCode, element: chip };
+    }
+
+    const textMatchElement = Array.from(document.querySelectorAll("*")).find((element) => {
+      const text = (element.textContent || "").trim();
+      if (/Bookwork check/i.test(text)) {
+        return false;
+      }
+
+      if (!extractBookworkCodeFromText(text)) {
+        return false;
+      }
+
+      return !Array.from(element.children).some((child) =>
+        extractBookworkCodeFromText(child.textContent || "")
+      );
+    });
+
+    const fallbackCode = extractBookworkCodeFromText(textMatchElement?.textContent);
+    if (fallbackCode) {
+      console.log(`[SparxSolver] Found bookwork code from fallback text: ${fallbackCode}`);
+      return { code: fallbackCode, element: textMatchElement };
+    }
+
+    console.warn("[SparxSolver] Current bookwork code chip not found.");
+    return { code: null, element: null };
+  }
+
+  function isBookworkCheckPage() {
+    return Array.from(document.querySelectorAll("*")).some((element) =>
+      (element.textContent || "").trim().toLowerCase().includes("bookwork check")
+    );
+  }
+
   // Function to find and display bookwork answer
   function findAndDisplayBookworkAnswer() {
-    // Get all elements on the page (not just divs)
-    const allElements = Array.from(document.querySelectorAll("*"));
+    const { code: bookworkCode, element: targetElement } = findCurrentBookworkCode();
 
-    // Filter for innermost elements that contain "Bookwork" text
-    // (exclude parent elements that only contain "Bookwork" via child elements)
-    const bookworkElements = allElements.filter((element) => {
-      const text = element.textContent || "";
-      if (!text.includes("Bookwork")) return false;
-
-      // Check if any child element also contains "Bookwork"
-      const hasChildWithBookwork = Array.from(element.children).some((child) => {
-        return child.textContent && child.textContent.includes("Bookwork");
-      });
-
-      // Only return true if this element contains "Bookwork" but children don't
-      return !hasChildWithBookwork;
-    });
-
-    console.log(bookworkElements)
-
-    if (bookworkElements.length === 0) {
-      console.log("[SparxSolver] No element containing 'Bookwork' found on page.");
-      return;
-    }
-
-    console.log(
-      `[SparxSolver] Found ${bookworkElements.length} element(s) containing 'Bookwork'.`
-    );
-
-    // Find the "Bookwork check" element to exclude it
-    const bookworkCheckElement = bookworkElements.find((element) => {
-      const text = (element.textContent || "").trim();
-      return text.includes("Bookwork check");
-    });
-
-    console.log(bookworkCheckElement)
-
-    // Filter out the "Bookwork check" element to get the actual bookwork code element
-    const bookworkCodeElements = bookworkElements.filter((element) => element !== bookworkCheckElement);
-
-    if (bookworkCodeElements.length === 0) {
-      console.log(
-        "[SparxSolver] No bookwork code element found (only 'Bookwork check' present)."
-      );
-      return;
-    }
-
-    // Use the first matching bookwork code element (e.g., "Bookwork 5B")
-
-    const targetElement = bookworkCodeElements[0];
-    console.log(
-      "[SparxSolver] Target bookwork code element found. Text:",
-      targetElement.textContent
-    );
-    const fullText = (targetElement.textContent || "").trim();
-
-    console.log(
-      "[SparxSolver] Found target bookwork div. Text:",
-      fullText
-    );
-
-    // Extract bookwork code (e.g., "5B" from "Bookwork 5B")
-    const bookworkCode = fullText.replace("Bookwork", "").trim();
-
-    if (!bookworkCode) {
-      console.warn(
-        "[SparxSolver] Could not extract bookwork code from div text:",
-        fullText
-      );
+    if (!bookworkCode || !targetElement) {
+      console.log("[SparxSolver] No current bookwork chip/code found for image injection.");
       return;
     }
 
@@ -360,28 +365,108 @@ function consumePhraseResilient(currentText, cleanChoiceText) {
  * and snaps the entire container element as one single image.
  */
 
+function getBookworkOptionsContainer() {
+  return document.querySelector("div[class*='OptionsGrid']");
+}
+
+function findBookworkOptionElements() {
+  const container = getBookworkOptionsContainer();
+  if (!container) {
+    console.warn("[SparxSolver] Bookwork options grid not found.");
+    return [];
+  }
+
+  const selectors = [
+    "div[class*='_Option']",
+    "div[role='button']",
+    "button",
+    "div[class*='Interactable']",
+    "div[class*='CardContentClickable']",
+    "div[class*='Chip']",
+  ];
+
+  const seen = new Set();
+  const options = [];
+
+  for (const selector of selectors) {
+    for (const element of container.querySelectorAll(selector)) {
+      if (seen.has(element)) continue;
+      if (element.querySelector("[class*='OptionsGrid']")) continue;
+      if (!(element.textContent || "").trim() && !element.querySelector("img,svg,canvas")) continue;
+
+      seen.add(element);
+      options.push(element);
+    }
+
+    if (options.length > 1) {
+      break;
+    }
+  }
+
+  console.log(`[SparxSolver] Found ${options.length} bookwork option element(s).`, options);
+  return options;
+}
+
+function isLikelyBookworkOptionSelected(optionElement) {
+  if (!optionElement) {
+    return false;
+  }
+
+  const ariaSelected = optionElement.getAttribute("aria-selected");
+  const ariaPressed = optionElement.getAttribute("aria-pressed");
+  const dataSelected = optionElement.getAttribute("data-selected");
+  const className = optionElement.className || "";
+
+  if (ariaSelected === "true" || ariaPressed === "true" || dataSelected === "true") {
+    return true;
+  }
+
+  return /selected|active|checked|is-selected|is-active|highlighted|chosen/i.test(String(className));
+}
+
+async function clickBookworkOption(optionElement) {
+  if (!optionElement) {
+    return false;
+  }
+
+  optionElement.scrollIntoView({ block: "center", inline: "center" });
+  optionElement.click();
+
+  for (const eventName of ["pointerdown", "mousedown", "mouseup", "click"]) {
+    const EventCtor = eventName.startsWith("pointer") ? PointerEvent : MouseEvent;
+    optionElement.dispatchEvent(new EventCtor(eventName, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    }));
+  }
+
+  await sleep(400);
+
+  const selectedByState = isLikelyBookworkOptionSelected(optionElement);
+  const submitButton = findButtonWithNestedText("submit");
+  const submitClickable = !!submitButton && !submitButton.disabled && window.getComputedStyle(submitButton).pointerEvents !== "none";
+
+  return selectedByState || submitClickable;
+}
 
 async function handleBookworkCheck(imageUrl) {
   console.log("[SparxSolver] Starting visual bookwork verification check...");
 
   try {
-    // 1. Find all answer choices with class 'answer'
-    const answerDivs = Array.from(document.querySelectorAll("div.answer"));
-    if (!answerDivs.length) {
-      console.warn("[SparxSolver] No answer choices with class 'answer' found.");
+    const choicesContainer = getBookworkOptionsContainer();
+    const answerDivs = findBookworkOptionElements();
+
+    if (!choicesContainer || !answerDivs.length) {
+      console.warn("[SparxSolver] Bookwork options not found.");
       return false;
     }
 
-    // 2. Select the specific grid container containing the options
-    const choicesContainer = document.querySelector("div[class*='OptionsGrid']");
-    
     console.log("[SparxSolver] Targeting container:", choicesContainer);
 
-    // 3. Capture the choices area using your working inline slot capture tool
     console.log("[SparxSolver] Capturing numbered answer options...");
     const { imageDataUrl, choiceCount } = await captureInlineSlotArea(choicesContainer, answerDivs);
     
-    // 4. Pass the reference image and the complete grid screenshot over to the LLM listener
     console.log("[SparxSolver] Invoking LLM Vision choice selection...");
     const response = await chooseImageAnswer(
       imageUrl,        // Reference answer image URL string
@@ -392,14 +477,18 @@ async function handleBookworkCheck(imageUrl) {
 
     const choiceIndex = response?.choiceIndex;
 
-    // 5. Click the matching option returned by the background engine
     if (choiceIndex && choiceIndex > 0 && choiceIndex <= answerDivs.length) {
       console.log(`[SparxSolver] LLM Vision selected bookwork option index: ${choiceIndex}`);
-      answerDivs[choiceIndex - 1].click();
-      await sleep(200);
+      const selectionApplied = await clickBookworkOption(answerDivs[choiceIndex - 1]);
+      if (!selectionApplied) {
+        console.warn("[SparxSolver] Bookwork option click did not visibly affect the page.");
+        return false;
+      }
+
       return true;
     }
 
+    console.warn("[SparxSolver] LLM did not return a valid bookwork option index.", response);
   } catch (error) {
     console.error("[SparxSolver] Error during visual bookwork verification flow:", error);
   }
@@ -1027,28 +1116,28 @@ function clickSubmitButton(button) {
 }
 
 function waitForContinueLink(timeout = 5000, interval = 500) {
-  console.log("[SparxSolver] Waiting for Continue link...");
+  console.log("[SparxSolver] Waiting for Continue control...");
 
   return new Promise((resolve) => {
     const start = Date.now();
 
     const timer = setInterval(() => {
-      const link = findLinkWithNestedText('continue');
+      const continueControl = findLinkWithNestedText('continue');
 
-      if (link) {
-        const pointerEvents = window.getComputedStyle(link).pointerEvents;
+      if (continueControl) {
+        const pointerEvents = window.getComputedStyle(continueControl).pointerEvents;
+        const isDisabled = continueControl.disabled || continueControl.getAttribute("aria-disabled") === "true";
 
-        // clickable when NOT "none"
-        if (pointerEvents !== "none") {
+        if (pointerEvents !== "none" && !isDisabled) {
           clearInterval(timer);
-          console.log("[SparxSolver] Continue link is clickable.");
-          return resolve(link);
+          console.log("[SparxSolver] Continue control is clickable.");
+          return resolve(continueControl);
         }
       }
 
       if (Date.now() - start > timeout) {
         clearInterval(timer);
-        console.log("[SparxSolver] Continue link timeout.");
+        console.log("[SparxSolver] Continue control timeout.");
         return resolve(null);
       }
     }, interval);
@@ -1056,11 +1145,22 @@ function waitForContinueLink(timeout = 5000, interval = 500) {
 }
 
 function findLinkWithNestedText(text) {
-  console.log(`[SparxSolver] Finding, ${text}, link...`);
+  const candidateSelectors = [
+    "button",
+    "a",
+    "div[role='button']",
+    "[role='button']",
+    "div",
+  ];
 
-  return [...document.querySelectorAll("a")].find(link =>
-    link.textContent.trim().toLowerCase() === text.toLowerCase()
-  ) || null;
+  console.log(`[SparxSolver] Finding, ${text}, control...`);
+
+  return candidateSelectors
+    .flatMap(selector => [...document.querySelectorAll(selector)])
+    .find((element) => {
+      const normalizedText = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return normalizedText === text.toLowerCase() || normalizedText.startsWith(text.toLowerCase());
+    }) || null;
 }
 
 function findKeepGoingLink() {
@@ -1182,29 +1282,78 @@ async function runAutoSolvePageFlow(finalAnswer) {
 
   const IFRAME_ID = "sparx-solver-iframe";
   const MAX_IFRAME_HEIGHT = 700; // Maximum height for the iframe in pixels
+  const IFRAME_Z_INDEX = "2147483647";
   let iframe = null;
   let isIframeVisible = false;
+  let bodyPointerEventsObserver = null;
+  let autoBookworkRunInProgress = false;
+  let bookworkObserverTimer = null;
+
+  function getSolverIframe() {
+    return iframe || document.getElementById(IFRAME_ID);
+  }
+
+  function applyIframeInteractionStyles(iframeElement) {
+    if (!iframeElement) return;
+
+    iframeElement.style.position = "fixed";
+    iframeElement.style.top = "20px";
+    iframeElement.style.right = "20px";
+    iframeElement.style.width = "475px";
+    iframeElement.style.zIndex = IFRAME_Z_INDEX;
+    iframeElement.style.pointerEvents = "auto";
+    iframeElement.style.border = "1px solid #dbdbdb";
+    iframeElement.style.borderRadius = "8px";
+    iframeElement.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+    iframeElement.style.backgroundColor = "white";
+    iframeElement.style.transition = "height 0.2s ease-in-out";
+  }
+
+  function enablePageAndIframePointerEvents() {
+    if (
+      document.body.style.getPropertyValue("pointer-events") !== "auto" ||
+      document.body.style.getPropertyPriority("pointer-events") !== "important"
+    ) {
+      document.body.style.setProperty("pointer-events", "auto", "important");
+    }
+
+    applyIframeInteractionStyles(getSolverIframe());
+  }
+
+  function startBodyPointerEventsObserver() {
+    if (bodyPointerEventsObserver) return;
+
+    bodyPointerEventsObserver = new MutationObserver(() => {
+      if (!isIframeVisible) return;
+      enablePageAndIframePointerEvents();
+    });
+
+    bodyPointerEventsObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
+  }
+
+  function stopBodyPointerEventsObserver() {
+    if (!bodyPointerEventsObserver) return;
+
+    bodyPointerEventsObserver.disconnect();
+    bodyPointerEventsObserver = null;
+  }
 
   function createIframe() {
     if (document.getElementById(IFRAME_ID)) {
-      return document.getElementById(IFRAME_ID);
+      const existingIframe = document.getElementById(IFRAME_ID);
+      applyIframeInteractionStyles(existingIframe);
+      return existingIframe;
     }
 
     const iframeElement = document.createElement("iframe");
     iframeElement.id = IFRAME_ID;
     iframeElement.src = chrome.runtime.getURL("popup.html");
-    iframeElement.style.position = "fixed";
-    iframeElement.style.top = "20px";
-    iframeElement.style.right = "20px";
-    iframeElement.style.width = "475px";
     iframeElement.style.height = "200px"; // Initial height, will be adjusted dynamically
-    iframeElement.style.zIndex = "99999";
-    iframeElement.style.border = "1px solid #dbdbdb";
-    iframeElement.style.borderRadius = "8px";
-    iframeElement.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-    iframeElement.style.backgroundColor = "white";
     iframeElement.style.display = "none"; // Initially hidden
-    iframeElement.style.transition = "height 0.2s ease-in-out";
+    applyIframeInteractionStyles(iframeElement);
 
     document.body.appendChild(iframeElement);
     return iframeElement;
@@ -1217,56 +1366,99 @@ async function runAutoSolvePageFlow(finalAnswer) {
 
     isIframeVisible = !isIframeVisible;
     iframe.style.display = isIframeVisible ? "block" : "none";
+    applyIframeInteractionStyles(iframe);
+
+    if (isIframeVisible) {
+      enablePageAndIframePointerEvents();
+      startBodyPointerEventsObserver();
+    } else {
+      stopBodyPointerEventsObserver();
+    }
+
     console.log(
       `[SparxSolver] Iframe visibility toggled to: ${iframe.style.display}`
     );
   }
 
   async function runAutoBookworkSequence() {
-  chrome.storage.local.get(["autoBookworkEnabled", "bookworks"], async (data) => {
-    if (!data.autoBookworkEnabled) {
-      console.log("[SparxSolver] Auto bookwork toggle is OFF. Skipping automated run.");
+    if (autoBookworkRunInProgress) {
+      console.log("[SparxSolver] Auto bookwork run already in progress.");
       return;
     }
 
-    // Check if we are actually on a "Bookwork check" page to avoid running prematurely
-    const isBookworkPage = Array.from(document.querySelectorAll("*")).some(el => 
-      (el.textContent || "").trim().toLowerCase().includes("bookwork check")
-    );
+    autoBookworkRunInProgress = true;
 
-    if (!isBookworkPage) {
-      console.log("[SparxSolver] Not currently on a Bookwork check screen.");
-      return;
-    }
+    try {
+      const data = await new Promise((resolve) => {
+        chrome.storage.local.get(["autoBookworkEnabled", "bookworks"], resolve);
+      });
 
-    console.log("[SparxSolver] Bookwork page detected. Proceeding with automated verification...");
-
-    const bookworkElements = Array.from(document.querySelectorAll("*")).filter((el) => {
-      const text = el.textContent || "";
-      return text.includes("Bookwork") && !Array.from(el.children).some(c => c.textContent?.includes("Bookwork"));
-    });
-
-    const bookworkCheckElement = bookworkElements.find(el => (el.textContent || "").trim().includes("Bookwork check"));
-    const bookworkCodeElements = bookworkElements.filter(el => el !== bookworkCheckElement);
-
-    if (bookworkCodeElements.length > 0) {
-      const fullText = (bookworkCodeElements[0].textContent || "").trim();
-      const bookworkCode = fullText.replace("Bookwork", "").trim();
-
-      if (bookworkCode && data.bookworks && data.bookworks[bookworkCode]) {
-        const imageUrl = data.bookworks[bookworkCode];
-        // Execute the automated OCR + Vision fallback pipeline
-        await handleBookworkCheck(imageUrl);
-
-        //6. Click submit button
-        await sleep(200);
-        findButtonWithNestedText('submit')?.click();
-        await sleep(500);
-        findButtonWithNestedText('continue')?.click();
+      if (!data.autoBookworkEnabled) {
+        console.log("[SparxSolver] Auto bookwork toggle is OFF. Skipping automated run.");
+        return;
       }
+
+      if (!isBookworkCheckPage()) {
+        console.log("[SparxSolver] Not currently on a Bookwork check screen.");
+        return;
+      }
+
+      console.log("[SparxSolver] Bookwork page detected. Proceeding with automated verification...");
+
+      const { code: bookworkCode } = findCurrentBookworkCode();
+      if (!bookworkCode) {
+        console.log("[SparxSolver] No current bookwork code found for automated run.");
+        return;
+      }
+
+      const imageUrl = data.bookworks?.[bookworkCode];
+      if (!imageUrl) {
+        console.log(`[SparxSolver] No saved bookwork image found for code: ${bookworkCode}.`);
+        return;
+      }
+
+      const selectionSucceeded = await handleBookworkCheck(imageUrl);
+      if (!selectionSucceeded) {
+        console.warn("[SparxSolver] Bookwork option was not selected; skipping submit/continue.");
+        return;
+      }
+
+      const submitButton = await waitForSubmitButton();
+      if (!submitButton) {
+        console.warn("[SparxSolver] Submit button never became enabled after selection.");
+        return;
+      }
+
+      if (!clickSubmitButton(submitButton)) {
+        console.warn("[SparxSolver] Failed to click the Bookwork submit button.");
+        return;
+      }
+
+      const continueLink = await waitForContinueLink();
+      if (!continueLink) {
+        console.warn("[SparxSolver] Continue link never appeared after Bookwork submit.");
+        return;
+      }
+
+      console.log("[SparxSolver] Continue link found. Proceeding to next screen.");
+      continueLink.click();
+    } finally {
+      autoBookworkRunInProgress = false;
     }
-  });
-}
+  }
+
+  function scheduleBookworkPageRefresh(delay = 300) {
+    clearTimeout(bookworkObserverTimer);
+
+    bookworkObserverTimer = setTimeout(() => {
+      if (!isBookworkCheckPage()) {
+        return;
+      }
+
+      findAndDisplayBookworkAnswer();
+      runAutoBookworkSequence();
+    }, delay);
+  }
 
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "toggle_ui") {
@@ -1291,20 +1483,17 @@ async function runAutoSolvePageFlow(finalAnswer) {
 
   else if (request.action === "enablePointerEvents") {
   setTimeout(() => {
-    document.body.style.setProperty("pointer-events", "all", "important");
+    enablePageAndIframePointerEvents();
 
     console.log(
-      "[SparxSolver] Pointer events enabled on body with !important after 2000ms delay."
+      "[SparxSolver] Pointer events enabled on body and iframe with !important after 2000ms delay."
     );
 
     sendResponse({
-      status: "Pointer events enabled with !important after delay",
+      status: "Pointer events enabled on body and iframe after delay",
     });
 
-    findAndDisplayBookworkAnswer();
-
-    // Call the shared runner on load
-    runAutoBookworkSequence();
+    scheduleBookworkPageRefresh(0);
 
     }, 2000);
   }
@@ -1334,6 +1523,7 @@ async function runAutoSolvePageFlow(finalAnswer) {
               newHeight = MAX_IFRAME_HEIGHT;
             }
             iframe.style.height = `${newHeight}px`;
+            applyIframeInteractionStyles(iframe);
           }
           break;
       }
@@ -1349,10 +1539,23 @@ async function runAutoSolvePageFlow(finalAnswer) {
     
     // If turned ON, dynamically kick off the sequence right now
     if (isBookworkEnabled) {
-      runAutoBookworkSequence();
+      scheduleBookworkPageRefresh(0);
     }
   }
 });
+
+  const bookworkPageObserver = new MutationObserver(() => {
+    if (autoBookworkRunInProgress) {
+      return;
+    }
+
+    scheduleBookworkPageRefresh(300);
+  });
+
+  bookworkPageObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
 
 
   // Listen for screenshot request from background.js
