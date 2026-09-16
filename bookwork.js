@@ -183,30 +183,94 @@ function sendMessageWithRetry(message, retries = 3, delay = 100) {
 
 let lastCorrectHandled = false;
 
+function isCleanBookworkCode(value) {
+  return /^\d+[A-Za-z]+$/.test(value);
+}
+
+function findBookworkCode() {
+  const taskItemsContainer = document.querySelector(
+    "div[class*='TaskItemsContainer']"
+  );
+
+  if (taskItemsContainer) {
+    const selectedCorrectTaskItem = taskItemsContainer.querySelector(
+      "a[class*='Correct'][class*='Selected']"
+    );
+    const selectedCode = selectedCorrectTaskItem
+      ?.querySelector("span")
+      ?.textContent.trim();
+
+    if (selectedCode && isCleanBookworkCode(selectedCode)) {
+      console.log(
+        `[SparxSolver] Found bookwork code from selected task item: ${selectedCode}`
+      );
+      return selectedCode;
+    }
+  }
+
+  const bookworkCodeElement = [...document.querySelectorAll("*")]
+    .filter((element) => element.textContent.includes("Bookwork code:"))
+    .pop();
+
+  if (bookworkCodeElement) {
+    const match = bookworkCodeElement.textContent.match(
+      /Bookwork code:\s*([0-9]+[A-Za-z]+)/
+    );
+
+    if (match && isCleanBookworkCode(match[1])) {
+      console.log(
+        `[SparxSolver] Found bookwork code from Bookwork code text: ${match[1]}`
+      );
+      return match[1];
+    }
+  }
+
+  const bookworkLabelElements = [...document.querySelectorAll("*")].filter(
+    (element) => {
+      const text = element.textContent || "";
+      if (!text.includes("Bookwork") || text.includes("Bookwork check")) {
+        return false;
+      }
+
+      return !Array.from(element.children).some((child) => {
+        const childText = child.textContent || "";
+        return childText.includes("Bookwork");
+      });
+    }
+  );
+
+  for (const element of bookworkLabelElements) {
+    const match = (element.textContent || "")
+      .trim()
+      .match(/^Bookwork\s+([0-9]+[A-Za-z]+)$/);
+
+    if (match && isCleanBookworkCode(match[1])) {
+      console.log(
+        `[SparxSolver] Found bookwork code from Bookwork label: ${match[1]}`
+      );
+      return match[1];
+    }
+  }
+
+  const detectedBookworkTexts = [...document.querySelectorAll("*")]
+    .map((element) => (element.textContent || "").trim())
+    .filter((text) => text.includes("Bookwork"))
+    .slice(0, 5);
+
+  console.warn(
+    "[SparxSolver] Bookwork code not found; screenshot was captured but not saved.",
+    detectedBookworkTexts
+  );
+  return null;
+}
+
 function logIfCorrectMessagePresent() {
   const correctSpan = document.querySelector("span._ResultMessage_1ylu5_132");
   if (correctSpan && correctSpan.textContent.trim() === "Correct!") {
     if (lastCorrectHandled) return; // Prevent repeat
     lastCorrectHandled = true;
     console.log("Correct!");
-    // Find the bookwork code div
-    let bookworkCode = null;
-    const bookworkDiv = [...document.querySelectorAll("div")]
-      .filter((div) => div.textContent.includes("Bookwork code:"))
-      .pop();
-    if (bookworkDiv) {
-      const match = bookworkDiv.textContent.match(/Bookwork code: (.+)/);
-      if (match) {
-        bookworkCode = match[1];
-        console.log("Bookwork code:", bookworkCode);
-      } else {
-        console.log(
-          "Bookwork code div found, but text did not match expected pattern."
-        );
-      }
-    } else {
-      console.log("Bookwork code div not found.");
-    }
+    const bookworkCode = findBookworkCode();
     // Take screenshot of the question div with delay and block continue
     screenshotQuestionDivWithDelay(bookworkCode);
   } else {
