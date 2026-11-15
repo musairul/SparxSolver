@@ -35,7 +35,95 @@ async function loadSystemPrompt() {
   }
 }
 
+function sendDebuggerCommand(debuggee, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(debuggee, method, params, (result) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+async function dispatchTrustedInput(tabId, events) {
+  const debuggee = { tabId };
+  let attached = false;
+
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach(debuggee, "1.3", () => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve();
+      });
+    });
+    attached = true;
+
+    for (const event of events) {
+      if (event.type === "click") {
+        const coordinates = { x: event.x, y: event.y, button: "left", clickCount: 1 };
+        await sendDebuggerCommand(debuggee, "Input.dispatchMouseEvent", { ...coordinates, type: "mouseMoved" });
+        await sendDebuggerCommand(debuggee, "Input.dispatchMouseEvent", { ...coordinates, type: "mousePressed" });
+        await sendDebuggerCommand(debuggee, "Input.dispatchMouseEvent", { ...coordinates, type: "mouseReleased" });
+      } else if (event.type === "key") {
+        const keyData = {
+          key: event.key,
+          code: event.code,
+          windowsVirtualKeyCode: event.windowsVirtualKeyCode,
+          nativeVirtualKeyCode: event.windowsVirtualKeyCode,
+          modifiers: event.modifiers || 0,
+        };
+        await sendDebuggerCommand(debuggee, "Input.dispatchKeyEvent", { ...keyData, type: "keyDown" });
+        if (event.text) {
+          await sendDebuggerCommand(debuggee, "Input.dispatchKeyEvent", {
+            ...keyData,
+            type: "char",
+            text: event.text,
+            unmodifiedText: event.text,
+          });
+        }
+        await sendDebuggerCommand(debuggee, "Input.dispatchKeyEvent", { ...keyData, type: "keyUp" });
+      }
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.warn("[SparxSolver] Trusted input failed:", error.message);
+    return { error: error.message };
+  } finally {
+    if (attached) {
+      await new Promise((resolve) => {
+        chrome.debugger.detach(debuggee, () => resolve());
+      });
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "trustedInputSequence") {
+    const tabId = sender.tab?.id;
+    let hostname = "";
+    try {
+      hostname = new URL(sender.url || "").hostname;
+    } catch (error) {
+      sendResponse({ error: "Could not verify the input target tab." });
+      return;
+    }
+
+    const allowedHost = hostname === "sparxmaths.com" || hostname.endsWith(".sparxmaths.com") ||
+      hostname === "sparx-learning.com" || hostname.endsWith(".sparx-learning.com");
+    if (!tabId || !allowedHost || !Array.isArray(request.events)) {
+      sendResponse({ error: "Trusted input is only allowed on Sparx pages." });
+      return;
+    }
+
+    dispatchTrustedInput(tabId, request.events).then(sendResponse);
+    return true;
+  }
+
   if (request.action === "solveMath") {
     captureAndProcessScreenshot(sendResponse);
     return true;
@@ -264,11 +352,13 @@ chrome.runtime.onConnect.addListener(function (port) {
   if (port.name === "solveMathStream") {
     port.onMessage.addListener(async function (msg) {
       if (msg.action === "solveMath") {
+        let requestTimeout = null;
+        let storedProvider = null;
         try {
           // Fetch API Key, provider, and model from storage
           const {
             apiKey: storedApiKey,
-            provider: storedProvider,
+            provider,
             model: storedModel,
           } = await new Promise((resolve) =>
             chrome.storage.local.get(
@@ -276,6 +366,7 @@ chrome.runtime.onConnect.addListener(function (port) {
               resolve
             )
           );
+          storedProvider = provider;
 
           if (!storedApiKey || !storedProvider || (!storedModel && !PROVIDERS[storedProvider]?.models)) {
             let missingFields = [];
@@ -302,10 +393,9 @@ chrome.runtime.onConnect.addListener(function (port) {
           }
 
           // 1. Request screenshot of the question element from content script
-          const [tab] = await chrome.tabs.query({
-            active: true,
-            currentWindow: true,
-          });
+          const tab = msg.tabId
+            ? await chrome.tabs.get(msg.tabId).catch(() => null)
+            : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
           if (!tab || !tab.id) {
             port.postMessage({
               error: "No active tab found. Please open a Sparx Learning page and make sure the extension has access to it.",
@@ -331,6 +421,8 @@ chrome.runtime.onConnect.addListener(function (port) {
           }
           const dataUrl = dataUrlResponse.dataUrl;
           const base64ImageData = dataUrl.split(",")[1];
+          const viewportDataUrl = dataUrlResponse.viewportDataUrl || dataUrlResponse.dataUrl;
+          const base64ViewportImageData = viewportDataUrl.split(",")[1];
 
           const detailedPrompt = await loadSystemPrompt();
 
@@ -340,15 +432,30 @@ chrome.runtime.onConnect.addListener(function (port) {
 
           let response = null;
           let fetchError = null;
+          const requestController = new AbortController();
+          requestTimeout = setTimeout(() => requestController.abort(), 60000);
 
           for (const modelToTry of modelsToTry) {
             const requestBody = {
               model: modelToTry,
               messages: [
                 {
+                  role: "system",
+                  content: detailedPrompt,
+                },
+                {
                   role: "user",
                   content: [
-                    { type: "text", text: detailedPrompt },
+                    {
+                      type: "text",
+                      text: `Analyze both attached screenshots: the first is the full visible page including its answer-entry interface and keypad; the second is a focused question-and-answer crop. Also use this detected answer layout in DOM order: ${JSON.stringify(dataUrlResponse.answerLayout || [])}. Determine which keys/slots are available and map one exact, box-ready expression to each blank in order.`,
+                    },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: `data:image/png;base64,${base64ViewportImageData}`,
+                      },
+                    },
                     {
                       type: "image_url",
                       image_url: {
@@ -359,7 +466,7 @@ chrome.runtime.onConnect.addListener(function (port) {
                 },
               ],
               stream: true,
-              max_tokens: 60000,
+              max_tokens: 4096,
               temperature: 0.3,
             };
 
@@ -373,6 +480,7 @@ chrome.runtime.onConnect.addListener(function (port) {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${storedApiKey}`,
                   },
+                  signal: requestController.signal,
                   body: JSON.stringify(requestBody),
                 }
               );
@@ -395,6 +503,8 @@ chrome.runtime.onConnect.addListener(function (port) {
           }
 
           if (!response || !response.ok || !response.body) {
+            clearTimeout(requestTimeout);
+            requestTimeout = null;
             let errorDetails = "";
             let status = response ? response.status : 0;
             let statusText = response ? response.statusText : "";
@@ -451,16 +561,45 @@ chrome.runtime.onConnect.addListener(function (port) {
                 }
               }
             }
-            if (streamDone) break;
+              if (streamDone) {
+                buffer += decoder.decode();
+                for (const trailingLine of buffer.split(/\r?\n/)) {
+                  const line = trailingLine.trim();
+                  if (!line.startsWith("data: ")) continue;
+
+                  const data = line.slice(6).trim();
+                  if (data === "[DONE]") {
+                    done = true;
+                    continue;
+                  }
+                  if (!data) continue;
+
+                  try {
+                    const parsed = JSON.parse(data);
+                    const chunk = parsed.choices?.[0]?.delta?.content;
+                    if (chunk) port.postMessage({ chunk });
+                  } catch (error) {
+                    console.warn("[SparxSolver] Ignoring malformed final stream record.", error);
+                  }
+                }
+                buffer = "";
+                break;
+              }
           }
           port.postMessage({ done: true });
+          clearTimeout(requestTimeout);
+          requestTimeout = null;
           port.disconnect();
         } catch (error) {
+          if (requestTimeout) {
+            clearTimeout(requestTimeout);
+          }
+
           let errorMessage = error.message || "Unknown error";
 
           if (error.message?.includes("Failed to fetch")) {
             errorMessage = `Network error: Unable to reach ${PROVIDERS[storedProvider]?.name}. Check your internet connection and firewall settings.`;
-          } else if (error.message?.includes("timeout")) {
+          } else if (error.name === "AbortError" || error.message?.includes("timeout")) {
             errorMessage = `Request timeout: ${PROVIDERS[storedProvider]?.name} took too long to respond. Please try again.`;
           } else if (error.message?.includes("JSON")) {
             errorMessage = `Invalid response from ${PROVIDERS[storedProvider]?.name}: Could not parse response format. The provider may have changed their API.`;
@@ -536,9 +675,16 @@ async function captureAndProcessScreenshot(sendResponse) {
         model: modelToTry,
         messages: [
           {
+            role: "system",
+            content: detailedPrompt,
+          },
+          {
             role: "user",
             content: [
-              { type: "text", text: detailedPrompt },
+              {
+                type: "text",
+                text: "Analyze both the question and visible answer-entry interface in the attached screenshot. Identify the answer blanks and provide one exact, box-ready expression per blank in reading order.",
+              },
               {
                 type: "image_url",
                 image_url: {
@@ -548,7 +694,7 @@ async function captureAndProcessScreenshot(sendResponse) {
             ],
           },
         ],
-        max_tokens: 60000,
+        max_tokens: 4096,
         temperature: 0.3,
       };
 

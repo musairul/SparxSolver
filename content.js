@@ -179,10 +179,7 @@ async function waitForContinue(timeout = 5000, interval = 100) {
 
 function findAnswerButton() {
   console.log("[SparxSolver] Finding Answer button...");
-
-  return [...document.querySelectorAll("button")].find(button =>
-    button.textContent.trim().toLowerCase() === "answer"
-  ) || null;
+  return findActionControlByText("answer");
 }
 
 function clickAnswerButton() {
@@ -199,7 +196,7 @@ function clickAnswerButton() {
   return true;
 }
 
-function getOrderedAnswerItems() {
+function getOrderedAnswerItems(log = true) {
   let answerParts = [
     ...document.querySelectorAll("[class*='AnswerPart']")
   ];
@@ -207,34 +204,95 @@ function getOrderedAnswerItems() {
   const items = [];
 
   if (answerParts.length === 0) {
-    const mainContainer = document.querySelector("div[class*='QuestionWrapper']");
+    const mainContainer = findQuestionContentElement();
     if (mainContainer) {
-      console.log("[SparxSolver] No AnswerPart elements found. Using main QuestionWrapper container.");
+      if (log) console.log("[SparxSolver] No AnswerPart elements found. Using main QuestionWrapper container.");
       answerParts = [mainContainer];
     }
   }
 
-  console.log("answerParts", answerParts);
+  if (log) console.log("answerParts", answerParts);
 
-  for (const part of answerParts) {
-    const numericInputs = [
-      ...part.querySelectorAll("input[class*='TextFieldNumeric']")
-    ];
+  const seenNumericInputs = new Set();
+  const numericFieldSelector = [
+    "[class*='TextFieldNumeric']",
+    "input[type='number']",
+    "input[inputmode='decimal']",
+    "input[inputmode='numeric']",
+    "input[placeholder*='number' i]",
+  ].join(", ");
+
+  for (const [partIndex, part] of answerParts.entries()) {
+    const numericInputs = [...part.querySelectorAll(numericFieldSelector)]
+      .map((field) => field.matches("input, textarea")
+        ? field
+        : field.querySelector("input, textarea, [role='textbox'], [contenteditable='true']"))
+      .filter((input) => {
+        if (!input || seenNumericInputs.has(input)) return false;
+        const style = window.getComputedStyle(input);
+        const visible = style.display !== "none" && style.visibility !== "hidden" && input.getClientRects().length > 0;
+        if (visible) seenNumericInputs.add(input);
+        return visible;
+      });
 
     if (numericInputs.length) {
-      for (const input of numericInputs) {
+      for (const [partFieldIndex, input] of numericInputs.entries()) {
         items.push({
           type: "numeric",
-          input
+          input,
+          fieldContainer: input.closest("[class*='TextFieldNumeric']") || input,
+          answerPart: part,
+          answerPartIndex: partIndex,
+          answerPartFieldIndex: partFieldIndex,
         });
       }
     }
 
-    // Locate this section inside getOrderedAnswerItems() loop and append the multiple-choice check:
+    const dropTargetSelector = [
+      "[class*='DropZone']",
+      "[class*='DropTarget']",
+      "[class*='Droppable']",
+      "[class*='DropArea']",
+      "[data-drop-target]",
+      "[aria-dropeffect]",
+      "[class*='_CardContentEmpty_']",
+    ].join(", ");
+    const dragChoiceSelector = [
+      "[draggable='true']",
+      "[class*='Draggable']",
+      "[class*='DragItem']",
+      "[class*='DragOption']",
+      "[data-draggable]",
+      "[class*='_CardContentClickable_']",
+    ].join(", ");
+    const dragDropTargets = [...part.querySelectorAll(dropTargetSelector)].filter(
+      (target) => !target.parentElement?.closest(dropTargetSelector)
+    );
+    const questionContainer = part.closest("[class*='QuestionWrapper']") || part;
+    const dragDropChoices = [...questionContainer.querySelectorAll(dragChoiceSelector)].filter(
+      (choice) =>
+        !choice.matches(dropTargetSelector) &&
+        !choice.closest(dropTargetSelector) &&
+        (choice.textContent || "").trim()
+    );
+    const hasDragDrop = dragDropTargets.length > 0 && dragDropChoices.length > 0;
 
-    const multipleChoiceButtons = [
+    if (hasDragDrop) {
+      const usedChoices = new Set();
+      for (const target of dragDropTargets) {
+        items.push({
+          type: "drag-drop",
+          target,
+          choices: dragDropChoices,
+          usedChoices,
+        });
+      }
+    }
+
+    const hasNumericInputs = numericInputs.length > 0;
+    const multipleChoiceButtons = hasDragDrop || hasNumericInputs ? [] : [
       ...part.querySelectorAll('div[role="button"]')
-    ].filter(choice => !choice.querySelector("img")); // Filter OUT items that contain images
+    ].filter(choice => !choice.querySelector("img"));
 
     if (multipleChoiceButtons.length > 0) {
       items.push({
@@ -244,7 +302,7 @@ function getOrderedAnswerItems() {
       });
     }
 
-    const imageChoices = [
+    const imageChoices = hasDragDrop || hasNumericInputs ? [] : [
       ...part.querySelectorAll('div[role="button"]')
     ].filter(choice => choice.querySelector("img"));
 
@@ -256,7 +314,7 @@ function getOrderedAnswerItems() {
       });
     }
 
-    const inlineSlots = [
+    const inlineSlots = hasDragDrop ? [] : [
       ...part.querySelectorAll("[class*='_CardContentEmpty_']")
     ];
 
@@ -274,6 +332,20 @@ function getOrderedAnswerItems() {
   }
 
   return items;
+}
+
+function getStaticAnswerPartText(item) {
+  if (!item.answerPart) return "";
+
+  const clone = item.answerPart.cloneNode(true);
+  clone.querySelectorAll(
+    "input, textarea, button, [role='button'], [contenteditable='true'], [class*='TextFieldNumeric'], [class*='Keypad'], [class*='keypad']"
+  ).forEach((element) => element.remove());
+
+  return (clone.innerText || clone.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
 }
 
 /**
@@ -310,6 +382,59 @@ function cleanMathText(text) {
     .replace(/[()]/g, "")        // Remove parentheses
     .replace(/\s+/g, "")         // Remove all whitespace
     .trim();
+}
+
+function normalizeAlgebraFactor(text) {
+  return String(text)
+    .replace(/\$/g, "")
+    .replace(/\\(?:left|right)\b/g, "")
+    .replace(/\\(?:cdot|times)\b/g, "*")
+    .replace(/[·×]/g, "*")
+    .replace(/²/g, "^2")
+    .replace(/³/g, "^3")
+    .replace(/\^\{([^}]+)\}/g, "^$1")
+    .replace(/[{}\s]/g, "")
+    .replace(/[−–]/g, "-")
+    .toLowerCase();
+}
+
+function getCommutativeProductFactors(expression) {
+  const normalized = normalizeAlgebraFactor(expression);
+  const factors = [];
+  let depth = 0;
+  let factorStart = -1;
+  let consumedThrough = 0;
+
+  for (let index = 0; index < normalized.length; index++) {
+    const character = normalized[index];
+    if (character === "(") {
+      if (depth === 0) {
+        const separator = normalized.slice(consumedThrough, index).replace(/[*)]/g, "");
+        if (separator) return null;
+        factorStart = index + 1;
+      }
+      depth++;
+    } else if (character === ")") {
+      depth--;
+      if (depth < 0) return null;
+      if (depth === 0) {
+        factors.push(normalized.slice(factorStart, index));
+        consumedThrough = index + 1;
+      }
+    }
+  }
+
+  if (depth !== 0 || factors.length < 2) return null;
+  if (normalized.slice(consumedThrough).replace(/[*)]/g, "")) return null;
+  return factors.sort();
+}
+
+function hasEquivalentFactorProduct(firstExpression, secondExpression) {
+  const firstFactors = getCommutativeProductFactors(firstExpression);
+  const secondFactors = getCommutativeProductFactors(secondExpression);
+  return !!firstFactors && !!secondFactors &&
+    firstFactors.length === secondFactors.length &&
+    firstFactors.every((factor, index) => factor === secondFactors[index]);
 }
 
 /**
@@ -412,16 +537,27 @@ function isLikelyBookworkOptionSelected(optionElement) {
     return false;
   }
 
-  const ariaSelected = optionElement.getAttribute("aria-selected");
-  const ariaPressed = optionElement.getAttribute("aria-pressed");
-  const dataSelected = optionElement.getAttribute("data-selected");
-  const className = optionElement.className || "";
+  let candidate = optionElement;
+  for (let depth = 0; candidate && depth < 3; depth++, candidate = candidate.parentElement) {
+    const ariaSelected = candidate.getAttribute("aria-selected");
+    const ariaPressed = candidate.getAttribute("aria-pressed");
+    const ariaChecked = candidate.getAttribute("aria-checked");
+    const dataSelected = candidate.getAttribute("data-selected");
+    const dataState = candidate.getAttribute("data-state");
+    const className = candidate.className || "";
+    const checkedInput = candidate.matches("input:checked") || !!candidate.querySelector("input:checked");
 
-  if (ariaSelected === "true" || ariaPressed === "true" || dataSelected === "true") {
-    return true;
+    if (ariaSelected === "true" || ariaPressed === "true" || ariaChecked === "true" ||
+        dataSelected === "true" || /^(checked|selected|active)$/i.test(dataState || "") || checkedInput) {
+      return true;
+    }
+
+    if (/selected|active|checked|is-selected|is-active|highlighted|chosen/i.test(String(className))) {
+      return true;
+    }
   }
 
-  return /selected|active|checked|is-selected|is-active|highlighted|chosen/i.test(String(className));
+  return false;
 }
 
 async function clickBookworkOption(optionElement) {
@@ -560,7 +696,7 @@ async function captureInlineSlotArea(container, choices) {
 async function handleInlineSlotAnswer(item, dynamicAnswer) {
   console.log("[SparxSolver] Opening inline slot...");
   
-  clickIntoInput(item.slot);
+  await clickIntoInput(item.slot);
   await sleep(300); // Wait for the dropdown container to generate
 
   const optionsContainer = document.querySelector("[class*='_InlineSlotOptions_']");
@@ -592,19 +728,28 @@ async function handleInlineSlotAnswer(item, dynamicAnswer) {
   processedChoices.sort((a, b) => b.cleanText.length - a.cleanText.length);
 
   const normalizedAnswer = cleanMathText(dynamicAnswer);
-  let targetChoice = null;
+  let targetChoice = processedChoices.find((choice) =>
+    hasEquivalentFactorProduct(dynamicAnswer, choice.rawText)
+  ) || null;
 
-  for (const choice of processedChoices) {
-    if (choice.cleanText && normalizedAnswer.includes(choice.cleanText)) {
-      targetChoice = choice;
-      break;
+  if (targetChoice) {
+    console.info(`[SparxSolver] Matched equivalent factor product despite factor order: "${targetChoice.rawText}".`);
+  }
+
+  if (!targetChoice) {
+    for (const choice of processedChoices) {
+      if (choice.cleanText && normalizedAnswer.includes(choice.cleanText)) {
+        targetChoice = choice;
+        break;
+      }
     }
   }
 
   if (targetChoice) {
     console.log(`[SparxSolver] Selecting inline math option: "${targetChoice.rawText}"`);
-    targetChoice.element.click();
-    await sleep(200);
+    if (!await activateAndVerifyAnswerChoice(targetChoice.element, "inline math option")) {
+      return null;
+    }
     return targetChoice.cleanText; // Return clean representation to guide cutting engine
   }
 
@@ -625,9 +770,9 @@ async function handleInlineSlotAnswer(item, dynamicAnswer) {
     if (choiceIndex && choiceIndex > 0 && choiceIndex <= choices.length) {
       const selectedChoice = choices[choiceIndex - 1];
       console.log(`[SparxSolver] LLM Vision selected inline slot option index: ${choiceIndex}`);
-      
-      selectedChoice.click();
-      await sleep(200);
+      if (!await activateAndVerifyAnswerChoice(selectedChoice, `visual inline option ${choiceIndex}`)) {
+        return null;
+      }
       
       // Return the cleanText from the selected element to properly chop the dynamicAnswer window
       return cleanMathText(extractChoiceText(selectedChoice));
@@ -637,6 +782,67 @@ async function handleInlineSlotAnswer(item, dynamicAnswer) {
   }
 
   return null;
+}
+
+async function dragChoiceIntoTarget(choice, target) {
+  if (!choice.isConnected || !target.isConnected || typeof DataTransfer === "undefined") {
+    return false;
+  }
+
+  choice.scrollIntoView({ block: "center", inline: "center" });
+  target.scrollIntoView({ block: "center", inline: "center" });
+
+  const dataTransfer = new DataTransfer();
+  const choiceText = extractChoiceText(choice);
+  dataTransfer.setData("text/plain", choiceText);
+
+  function dispatchDragEvent(element, type) {
+    const rect = element.getBoundingClientRect();
+    return element.dispatchEvent(new DragEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    }));
+  }
+
+  dispatchDragEvent(choice, "dragstart");
+  dispatchDragEvent(target, "dragenter");
+  dispatchDragEvent(target, "dragover");
+  const dropAccepted = !dispatchDragEvent(target, "drop");
+  dispatchDragEvent(choice, "dragend");
+  await sleep(250);
+
+  const targetText = cleanMathText(extractChoiceText(target));
+  const expectedText = cleanMathText(choiceText);
+  return target.contains(choice) || targetText.includes(expectedText) || dropAccepted;
+}
+
+async function handleDragDropAnswer(item, dynamicAnswer) {
+  const normalizedAnswer = cleanMathText(dynamicAnswer);
+  const matchingChoice = item.choices
+    .filter((choice) => choice.isConnected && !item.usedChoices.has(choice))
+    .map((element) => ({
+      element,
+      cleanText: cleanMathText(extractChoiceText(element)),
+    }))
+    .filter((choice) => choice.cleanText && normalizedAnswer.includes(choice.cleanText))
+    .sort((first, second) => second.cleanText.length - first.cleanText.length)[0];
+
+  if (!matchingChoice) {
+    console.warn("[SparxSolver] No draggable option matched the answer text.");
+    return null;
+  }
+
+  const moved = await dragChoiceIntoTarget(matchingChoice.element, item.target);
+  if (!moved) {
+    console.warn("[SparxSolver] Drag-and-drop did not appear to reach its target.");
+    return null;
+  }
+
+  item.usedChoices.add(matchingChoice.element);
+  return matchingChoice.cleanText;
 }
 
 
@@ -796,7 +1002,7 @@ function selectImageAnswerChoiceMock(index) {
   return false;
 }
 
-function selectImageAnswerChoice(answerPart, index) {
+async function selectImageAnswerChoice(answerPart, index) {
   const choices = getImageAnswerChoices(answerPart);
 
   const target = choices[index - 1];
@@ -806,7 +1012,8 @@ function selectImageAnswerChoice(answerPart, index) {
     return false;
   }
 
-  target.click();
+  const selected = await activateAndVerifyAnswerChoice(target, `image option ${index}`);
+  if (!selected) return false;
 
   console.log(
     `[SparxSolver] Clicked image choice ${index}.`
@@ -829,86 +1036,373 @@ async function recognizeImageChoiceAnswer(answerPart, finalAnswer) {
   });
 
   console.log(`[SparxSolver] Recommended image answer choice: ${choiceIndex}`);
-  selectImageAnswerChoice(answerPart, choiceIndex);
+  const selected = await selectImageAnswerChoice(answerPart, choiceIndex);
+  if (!selected) {
+    throw new Error(`Image option ${choiceIndex} could not be selected.`);
+  }
   return { recognizedOnly: false, choiceIndex };
 }
 
-async function clickIntoInput(input) {
-  input.click();
-  input.focus();
-  
-  // Simulate the full lifecycle of a mouse click
-  input.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-  input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-  input.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+async function clickIntoInput(input, fieldContainer = input) {
+  const target = fieldContainer?.isConnected ? fieldContainer : input;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  const bounds = target.getBoundingClientRect();
+  const trustedClick = await dispatchTrustedInputSequence([{
+    type: "click",
+    x: bounds.left + bounds.width / 2,
+    y: bounds.top + bounds.height / 2,
+  }]);
 
-  console.log("click into input");
+  if (!trustedClick) {
+    const eventPosition = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2,
+    };
+    target.dispatchEvent(new PointerEvent("pointerdown", eventPosition));
+    target.dispatchEvent(new MouseEvent("mousedown", eventPosition));
+    target.dispatchEvent(new MouseEvent("mouseup", eventPosition));
+    target.dispatchEvent(new MouseEvent("click", eventPosition));
+  }
+  input.focus({ preventScroll: true });
+
+  const focused = document.activeElement === input;
+  console.info(`[SparxSolver] Activated answer-slot container; child input focused: ${focused}; slot position: ${Math.round(bounds.x)},${Math.round(bounds.y)}.`, target);
+  return focused;
 }
 
-async function typeIntoNumericInput(input, value) {
+async function typeIntoNumericInput(input, value, fieldContainer = input) {
+  await clickIntoInput(input, fieldContainer);
+  const expectedValue = String(value);
+  let prototype = input;
+  let valueSetter = null;
+  while (prototype && !valueSetter) {
+    valueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    prototype = Object.getPrototypeOf(prototype);
+  }
 
+  if (valueSetter) {
+    valueSetter.call(input, expectedValue);
+  } else if (input.isContentEditable || input.getAttribute("role") === "textbox") {
+    input.textContent = expectedValue;
+  } else {
+    throw new Error("No supported value setter found for the answer field.");
+  }
 
-  await clickIntoInput(input);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  await sleep(120);
 
-  await sleep(500);
+  return "value" in input
+    ? String(input.value)
+    : String(input.textContent || "").trim();
+}
 
-  console.log("Target:", input.dataset.ref);
-  console.log("Active:", document.activeElement.dataset.ref);
-  console.log("Same?", document.activeElement === input);
+function normalizeAnswerKeyLabel(value) {
+  return String(value || "")
+    .replace(/[−–]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/^(key|digit)\s+/, "")
+    .replace(/\s+(key|button)$/, "");
+}
 
-  for (const key of String(value)) {
-    let code;
+function dispatchTrustedInputSequence(events) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: "trustedInputSequence", events }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) {
+        if (response?.error) console.warn("[SparxSolver] Trusted input unavailable:", response.error);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
 
-    if (/^\d$/.test(key)) {
-      code = `Digit${key}`;
-    } else if (key === ".") {
-      code = "Period";
-    } else if (key === "-") {
-      code = "Minus";
+function trustedKeyEventForToken(token) {
+  if (/^\d$/.test(token)) {
+    return {
+      type: "key",
+      key: token,
+      code: `Digit${token}`,
+      windowsVirtualKeyCode: 48 + Number(token),
+      text: token,
+    };
+  }
+
+  const keyDefinitions = {
+    "-": { key: "-", code: "Minus", windowsVirtualKeyCode: 189, text: "-" },
+    ".": { key: ".", code: "Period", windowsVirtualKeyCode: 190, text: "." },
+    "/": { key: "/", code: "Slash", windowsVirtualKeyCode: 191, text: "/" },
+  };
+  return keyDefinitions[token] ? { type: "key", ...keyDefinitions[token] } : null;
+}
+
+async function activateAndVerifyAnswerChoice(choice, label) {
+  if (!choice?.isConnected) return false;
+  if (isLikelyBookworkOptionSelected(choice)) {
+    console.info(`[SparxSolver] ${label} is already selected.`);
+    return true;
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await activateAnswerKeyControl(choice);
+    await sleep(180);
+    if (!choice.isConnected) {
+      console.info(`[SparxSolver] ${label} was removed or replaced after activation.`);
+      return true;
+    }
+    if (isLikelyBookworkOptionSelected(choice)) {
+      console.info(`[SparxSolver] Verified ${label} selected on attempt ${attempt}.`);
+      return true;
+    }
+    console.warn(`[SparxSolver] ${label} selection not reflected in the page state after attempt ${attempt}/3.`);
+  }
+
+  return false;
+}
+
+function findAnswerKeyControl(token, cache = null) {
+  if (cache?.has(token)) return cache.get(token);
+
+  const aliases = {
+    "π": ["π", "pi", "pi symbol"],
+    "×": ["×", "multiply", "times"],
+    "-": ["-", "minus", "negative"],
+    ".": [".", "decimal", "decimal point"],
+    "/": ["/", "÷", "divide", "fraction"],
+    "^": ["^", "power", "exponent"],
+    "(": ["(", "left parenthesis"],
+    ")": [")", "right parenthesis"],
+    backspace: ["backspace", "delete", "⌫", "←"],
+    clear: ["clear", "clear all", "clear entry"],
+  };
+  const expectedLabels = new Set((aliases[token] || [token]).map(normalizeAnswerKeyLabel));
+  const selector = [
+    "button",
+    "[role='button']",
+    "[data-key]",
+    "[class*='Key']",
+    "[class*='key']",
+    "[class*='Button']",
+    "[class*='button']",
+  ].join(", ");
+
+  const controls = [...document.querySelectorAll(selector)];
+  const matchingControls = controls.filter((control) => {
+    const style = window.getComputedStyle(control);
+    if (style.display === "none" || style.visibility === "hidden" || !control.getClientRects().length) {
+      return false;
+    }
+    const labels = [
+      control.innerText,
+      control.textContent,
+      control.getAttribute("aria-label"),
+      control.getAttribute("title"),
+      control.getAttribute("data-key"),
+      control.getAttribute("data-value"),
+    ];
+    return labels.some((label) => expectedLabels.has(normalizeAnswerKeyLabel(label)));
+  });
+
+  const questionElement = findQuestionContentElement();
+  matchingControls.sort((first, second) => {
+    const keypadSelector = "[class*='Keypad'], [class*='keypad'], [class*='Keyboard'], [class*='keyboard'], [data-testid*='keypad' i]";
+    const firstInKeypad = first.closest(keypadSelector) ? 1 : 0;
+    const secondInKeypad = second.closest(keypadSelector) ? 1 : 0;
+    const firstInQuestion = questionElement?.contains(first) ? 1 : 0;
+    const secondInQuestion = questionElement?.contains(second) ? 1 : 0;
+    return secondInKeypad - firstInKeypad || secondInQuestion - firstInQuestion;
+  });
+
+  const result = matchingControls[0] || null;
+  cache?.set(token, result);
+  return result;
+}
+
+function createTrustedClickEvent(control, scrollIntoView = true) {
+  if (scrollIntoView) control.scrollIntoView({ block: "center", inline: "center" });
+  const bounds = control.getBoundingClientRect();
+  return {
+    type: "click",
+    x: bounds.left + bounds.width / 2,
+    y: bounds.top + bounds.height / 2,
+  };
+}
+
+function dispatchSyntheticClick(control) {
+  const bounds = control.getBoundingClientRect();
+  const eventOptions = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: bounds.left + bounds.width / 2,
+    clientY: bounds.top + bounds.height / 2,
+  };
+  control.dispatchEvent(new PointerEvent("pointerdown", eventOptions));
+  control.dispatchEvent(new MouseEvent("mousedown", eventOptions));
+  control.dispatchEvent(new PointerEvent("pointerup", eventOptions));
+  control.dispatchEvent(new MouseEvent("mouseup", eventOptions));
+  control.dispatchEvent(new MouseEvent("click", eventOptions));
+}
+
+async function activateAnswerKeyControl(control) {
+  const trustedClick = await dispatchTrustedInputSequence([createTrustedClickEvent(control)]);
+  if (trustedClick) return true;
+
+  dispatchSyntheticClick(control);
+  return false;
+}
+
+function getAnswerKeyTokens(value) {
+  return String(value)
+    .replace(/\$/g, "")
+    .replace(/\\(?:left|right)\b/g, "")
+    .replace(/\\pi\b/gi, "π")
+    .replace(/\bpi\b/gi, "π")
+    .replace(/\\(?:times|cdot)\b/g, "×")
+    .replace(/[{}\s]/g, "")
+    .split("")
+    .filter(Boolean);
+}
+
+async function enterAnswerWithKeypad(input, value, fieldContainer = input) {
+  const tokens = getAnswerKeyTokens(value);
+  const keyControlCache = new Map();
+  await clickIntoInput(input, fieldContainer);
+
+  const clearControl = findAnswerKeyControl("clear", keyControlCache);
+  const backspaceControl = findAnswerKeyControl("backspace", keyControlCache);
+  const tokenControls = [];
+  for (const [index, token] of tokens.entries()) {
+    const keyControl = findAnswerKeyControl(token, keyControlCache);
+    if (!keyControl && !trustedKeyEventForToken(token)) {
+      console.warn(`[SparxSolver] No keypad key or trusted keyboard input available for token "${token}" at position ${index + 1}.`);
+      return "";
+    }
+    tokenControls.push({ token, control: keyControl });
+  }
+
+  const keypadControls = [clearControl, backspaceControl, ...tokenControls.map(({ control }) => control)]
+    .filter(Boolean);
+  const keypadContainerSelector = "[class*='Keypad'], [class*='keypad'], [class*='Keyboard'], [class*='keyboard'], [data-testid*='keypad' i]";
+  const keypadContainer = keypadControls
+    .map((control) => control.closest(keypadContainerSelector))
+    .find(Boolean) || keypadControls[0];
+  if (keypadContainer) {
+    keypadContainer.scrollIntoView({ block: "center", inline: "center" });
+  }
+
+  const events = [];
+  if (clearControl) {
+    events.push(createTrustedClickEvent(clearControl, false));
+  } else if (backspaceControl) {
+    for (let count = 0; count < 20; count++) {
+      events.push(createTrustedClickEvent(backspaceControl, false));
+    }
+  } else {
+    events.push(
+      { type: "key", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 },
+      { type: "key", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+    );
+  }
+
+  for (const { token, control } of tokenControls) {
+    if (!control) {
+      const keyEvent = trustedKeyEventForToken(token);
+      events.push(keyEvent);
     } else {
-      code = `Key${key.toUpperCase()}`;
+      events.push(createTrustedClickEvent(control, false));
+    }
+  }
+
+  const trustedInputWorked = await dispatchTrustedInputSequence(events);
+  if (trustedInputWorked) {
+    await sleep(120);
+    const enteredValue = "value" in input
+      ? String(input.value)
+      : String(input.textContent || "").trim();
+    console.info(`[SparxSolver] Batched ${events.length} trusted keypad events for one answer field; expected "${value}", observed "${enteredValue}".`, tokenControls);
+    return enteredValue;
+  }
+
+  console.warn("[SparxSolver] Trusted input unavailable; falling back to individual DOM keypad events.");
+  await clickIntoInput(input, fieldContainer);
+  if (clearControl) {
+    dispatchSyntheticClick(clearControl);
+  } else if (backspaceControl) {
+    for (let count = 0; count < 20; count++) dispatchSyntheticClick(backspaceControl);
+  }
+  for (const { token, control } of tokenControls) {
+    if (control) {
+      dispatchSyntheticClick(control);
+    } else {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: token, bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keypress", { key: token, bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keyup", { key: token, bubbles: true }));
+    }
+  }
+  await sleep(120);
+  return "value" in input
+    ? String(input.value)
+    : String(input.textContent || "").trim();
+}
+
+async function typeNumericInput(input, value, fieldIndex = 0, answerPartIndex = fieldIndex, answerPartFieldIndex = 0, fieldContainer = input) {
+  if (value == null) return false;
+
+  const expectedValue = String(value);
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const refreshedFields = getOrderedAnswerItems(false)
+      .filter((item) => item.type === "numeric");
+    const refreshedPartField = refreshedFields.find((item) =>
+      item.answerPartIndex === answerPartIndex &&
+      item.answerPartFieldIndex === answerPartFieldIndex
+    );
+    const activeInput = input.isConnected
+      ? input
+      : refreshedPartField?.input || null;
+    const activeContainer = activeInput === input
+      ? fieldContainer
+      : refreshedPartField?.fieldContainer || activeInput;
+
+    if (!activeInput) {
+      console.warn(`[SparxSolver] Answer part ${answerPartIndex + 1}, field ${fieldIndex + 1} is missing on attempt ${attempt}/${maxAttempts}.`);
+    } else {
+      const bounds = activeContainer.getBoundingClientRect();
+      console.info(`[SparxSolver] Entering answer part ${answerPartIndex + 1}, field ${fieldIndex + 1}, attempt ${attempt}/${maxAttempts}; original field: ${activeInput === input}; position: ${Math.round(bounds.x)},${Math.round(bounds.y)}; value: ${expectedValue}.`);
+      try {
+        let actualValue = activeInput.readOnly
+          ? ""
+          : await typeIntoNumericInput(activeInput, expectedValue, activeContainer);
+        if (actualValue !== expectedValue) {
+          console.info(`[SparxSolver] ${activeInput.readOnly ? "Field is read-only" : "Native input was rejected"} for field ${fieldIndex + 1}; using the visible Sparx keypad.`);
+          actualValue = await enterAnswerWithKeypad(activeInput, expectedValue, activeContainer);
+        }
+
+        if (normalizeAnswerKeyLabel(actualValue) === normalizeAnswerKeyLabel(expectedValue)) {
+          console.info(`[SparxSolver] Verified answer part ${answerPartIndex + 1}, field ${fieldIndex + 1}: ${actualValue}`);
+          return true;
+        }
+        console.warn(`[SparxSolver] Answer part ${answerPartIndex + 1}, field ${fieldIndex + 1} verification mismatch: expected "${expectedValue}", got "${actualValue}".`);
+      } catch (error) {
+        console.warn(`[SparxSolver] Answer part ${answerPartIndex + 1}, field ${fieldIndex + 1} attempt ${attempt} failed:`, error);
+      }
     }
 
-    input.dispatchEvent(new KeyboardEvent("keydown", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
-
-    input.dispatchEvent(new KeyboardEvent("keypress", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
-
-    input.dispatchEvent(new KeyboardEvent("keyup", {
-      key,
-      code,
-      bubbles: true,
-      cancelable: true
-    }));
-
-    await sleep(20);
+    if (attempt < maxAttempts) {
+      await sleep(attempt * 300);
+    }
   }
 
-  console.log(
-  "After typing:",
-  input.dataset.ref,
-  "value =",
-  input.value
-);
-}
-
-async function typeNumericInput(input, value) {
-  if (value == null) {
-    return;
-  }
-  console.log("Typing", value, input);
-  await typeIntoNumericInput(input, value);
-  
+  console.error(`[SparxSolver] Could not verify answer part ${answerPartIndex + 1}, field ${fieldIndex + 1} after ${maxAttempts} attempts.`);
+  return false;
 }
 
 /**
@@ -917,6 +1411,18 @@ async function typeNumericInput(input, value) {
  * @returns {object} An object containing the matched numeric 'value' and the updated 'remaining' text.
  */
 function extractAndConsumeNumeric(currentText) {
+  const scientificMatch = currentText.match(
+    /(-?\d+(?:\.\d+)?)\s*(?:\\times|×|\\cdot|·)\s*10\s*\^\s*\{\s*(-?\d+)\s*\}/i
+  );
+
+  if (scientificMatch) {
+    const expressionEnd = scientificMatch.index + scientificMatch[0].length;
+    const remaining = currentText.slice(0, scientificMatch.index) +
+      scientificMatch[2] +
+      currentText.slice(expressionEnd);
+    return { value: scientificMatch[1], remaining };
+  }
+
   const match = currentText.match(/(?<!\^)-?\d+(\.\d+)?(?!\w)/);
   if (!match) {
     return { value: null, remaining: currentText };
@@ -965,8 +1471,9 @@ async function handleMultipleChoiceAnswer(item, dynamicAnswer) {
 
   if (targetChoice) {
     console.log(`[SparxSolver] Selecting matching text option: "${targetChoice.rawText}"`);
-    targetChoice.element.click();
-    await sleep(200);
+    if (!await activateAndVerifyAnswerChoice(targetChoice.element, "text answer option")) {
+      return null;
+    }
     return targetChoice.cleanText; // Return clean representation to guide cutting engine
   }
 
@@ -988,9 +1495,9 @@ async function handleMultipleChoiceAnswer(item, dynamicAnswer) {
     if (choiceIndex && choiceIndex > 0 && choiceIndex <= choices.length) {
       const selectedChoice = choices[choiceIndex - 1];
       console.log(`[SparxSolver] LLM Vision selected option index: ${choiceIndex}`);
-      
-      selectedChoice.click();
-      await sleep(200);
+      if (!await activateAndVerifyAnswerChoice(selectedChoice, `visual answer option ${choiceIndex}`)) {
+        return null;
+      }
       
       // Return cleanText from the selected element to properly slice the remaining stream
       return cleanMathText(extractChoiceText(selectedChoice));
@@ -1004,9 +1511,46 @@ async function handleMultipleChoiceAnswer(item, dynamicAnswer) {
 
 
 
+function parseLinearEquationForTwoNumericFields(finalAnswer, answerItems) {
+  const numericItems = answerItems.filter((item) => item.type === "numeric");
+  if (numericItems.length !== 2 || numericItems.length !== answerItems.length) return null;
+
+  const normalizedAnswer = String(finalAnswer)
+    .replace(/\$/g, "")
+    .replace(/\\(?:left|right)\b/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[·×]/g, "*");
+  const match = normalizedAnswer.match(/^y=(.*?)x([+-](?:\d+(?:\.\d+)?|\.\d+))$/i);
+  if (!match) return null;
+
+  let coefficient = match[1].replace(/(?:\\times|\\cdot|\*)$/i, "");
+  if (coefficient === "") coefficient = "1";
+  if (coefficient === "-") coefficient = "-1";
+  if (coefficient === "+") coefficient = "1";
+
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(coefficient)) return null;
+  if (coefficient.startsWith("+")) coefficient = coefficient.slice(1);
+  const intercept = match[2].startsWith("+") ? match[2].slice(1) : match[2];
+  return [coefficient, intercept];
+}
+
 async function typeAnswer(finalAnswer) {
   const answerItems = getOrderedAnswerItems();
   console.log(answerItems);
+  const numericTargets = answerItems
+    .filter((item) => item.type === "numeric")
+    .map((item, index) => {
+      const bounds = item.fieldContainer.getBoundingClientRect();
+      return {
+        field: index + 1,
+        answerPart: item.answerPartIndex + 1,
+        x: Math.round(bounds.x),
+        y: Math.round(bounds.y),
+        tag: item.input.tagName,
+        className: String(item.fieldContainer.className || "").slice(0, 100),
+      };
+    });
+  console.info("[SparxSolver] Numeric answer-slot map:", numericTargets);
 
   if (!answerItems.length) {
     console.error("[SparxSolver] No answer items found.");
@@ -1014,20 +1558,55 @@ async function typeAnswer(finalAnswer) {
   }
 
   let dynamicAnswer = finalAnswer;
+  let numericFieldIndex = 0;
+  const numericItemCount = answerItems.filter((item) => item.type === "numeric").length;
+  const answerParts = String(finalAnswer)
+    .trim()
+    .replace(/^\$|\$$/g, "")
+    .split(/\s*,\s*/)
+    .filter(Boolean);
+  const linearEquationParts = parseLinearEquationForTwoNumericFields(finalAnswer, answerItems);
+  if (linearEquationParts) {
+    console.info("[SparxSolver] Converted linear equation to coefficient/intercept blank values:", linearEquationParts);
+    answerParts.splice(0, answerParts.length, ...linearEquationParts);
+  }
+  const hasOneAnswerPerNumericField = numericItemCount === answerItems.length &&
+    answerParts.length === numericItemCount;
 
   for (const item of answerItems) {
     switch (item.type) {
       case "numeric": {
-        const { value, remaining } = extractAndConsumeNumeric(dynamicAnswer);
+        const currentFieldIndex = numericFieldIndex++;
+        const extracted = hasOneAnswerPerNumericField
+          ? { value: answerParts[currentFieldIndex], remaining: "" }
+          : extractAndConsumeNumeric(dynamicAnswer);
+        let { value } = extracted;
+        const { remaining } = extracted;
 
         if (!value) {
-          console.warn("[SparxSolver] Missing numeric value in remaining text:", dynamicAnswer);
-          continue;
+          console.error(`[SparxSolver] No numeric value found for field ${currentFieldIndex + 1}. Remaining answer:`, dynamicAnswer);
+          return false;
         }
 
-        await typeNumericInput(item.input, value);
+        const coefficientWithPi = String(value).match(/^(-?\d+(?:\.\d+)?)\s*(?:\\pi|π)$/i);
+        const staticPartText = getStaticAnswerPartText(item);
+        if (coefficientWithPi && /π|\\pi\b/i.test(staticPartText) &&
+            (item.input.readOnly || item.input.getAttribute("pattern"))) {
+          console.info(`[SparxSolver] Answer part ${item.answerPartIndex + 1} has a numeric-only blank with fixed π nearby; entering coefficient ${coefficientWithPi[1]}.`);
+          value = coefficientWithPi[1];
+        }
+
+        const enteredAndVerified = await typeNumericInput(
+          item.input,
+          value,
+          currentFieldIndex,
+          item.answerPartIndex,
+          item.answerPartFieldIndex,
+          item.fieldContainer
+        );
+        if (!enteredAndVerified) return false;
         dynamicAnswer = remaining;
-        console.log("[SparxSolver] Consumed numeric value. Remaining window:", dynamicAnswer);
+        console.info(`[SparxSolver] Field ${currentFieldIndex + 1} verified; remaining answer text:`, dynamicAnswer);
         break;
       }
 
@@ -1042,6 +1621,16 @@ async function typeAnswer(finalAnswer) {
         // Chop the remaining answer string window cleanly using your crawler
         dynamicAnswer = consumePhraseResilient(dynamicAnswer, matchedCleanText);
         console.log("[SparxSolver] Consumed multiple choice phrase. Remaining window:", dynamicAnswer);
+        break;
+      }
+
+      case "drag-drop": {
+        const matchedCleanText = await handleDragDropAnswer(item, dynamicAnswer);
+        if (!matchedCleanText) {
+          return false;
+        }
+
+        dynamicAnswer = consumePhraseResilient(dynamicAnswer, matchedCleanText);
         break;
       }
 
@@ -1071,7 +1660,16 @@ async function typeAnswer(finalAnswer) {
   return true;
 }
 
-function waitForSubmitButton(timeout = 10000, interval = 100) {
+function isButtonEnabled(button) {
+  return (
+    !!button &&
+    !button.disabled &&
+    button.getAttribute("aria-disabled") !== "true" &&
+    window.getComputedStyle(button).pointerEvents !== "none"
+  );
+}
+
+function waitForSubmitButton(timeout = 10000, interval = 100, requireEnabled = false) {
   console.log("[SparxSolver] Waiting for Submit button...");
 
   return new Promise((resolve) => {
@@ -1080,9 +1678,9 @@ function waitForSubmitButton(timeout = 10000, interval = 100) {
     const timer = setInterval(() => {
       const btn = findButtonWithNestedText('submit');
 
-      if (btn) {
+      if (btn && (!requireEnabled || isButtonEnabled(btn))) {
         clearInterval(timer);
-        console.log("[SparxSolver] Submit button found.");
+        console.log("[SparxSolver] Submit button ready.");
         return resolve(btn);
       }
 
@@ -1097,17 +1695,23 @@ function waitForSubmitButton(timeout = 10000, interval = 100) {
 
 function findButtonWithNestedText(text) {
   console.log(`[SparxSolver] Finding, ${text}, button...`);
-
-  return [...document.querySelectorAll("button")].find(button =>
-    button.textContent.trim().toLowerCase().startsWith(text.toLowerCase())
-  ) || null;
+  const expectedText = text.toLowerCase();
+  return [...document.querySelectorAll("button, a, [role='button']")].find((element) => {
+    const actualText = (element.innerText || element.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    const style = window.getComputedStyle(element);
+    const visible = style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+    return visible && (actualText === expectedText || actualText.startsWith(`${expectedText} `));
+  }) || null;
 }
 
 function clickSubmitButton(button) {
   console.log("[SparxSolver] Clicking Submit button...");
 
-  if (!button) {
-    console.error("[SparxSolver] Submit button not found.");
+  if (!isButtonEnabled(button)) {
+    console.error("[SparxSolver] Submit button is missing or disabled.");
     return false;
   }
 
@@ -1115,15 +1719,14 @@ function clickSubmitButton(button) {
   return true;
 }
 
-function waitForContinueLink(timeout = 5000, interval = 500) {
-  console.log("[SparxSolver] Waiting for Continue control...");
+function waitForPostSubmitAction(timeout = 15000, interval = 200) {
+  console.log("[SparxSolver] Waiting for Continue or Keep Going control...");
 
   return new Promise((resolve) => {
     const start = Date.now();
 
     const timer = setInterval(() => {
       const continueControl = findLinkWithNestedText('continue');
-
       if (continueControl) {
         const pointerEvents = window.getComputedStyle(continueControl).pointerEvents;
         const isDisabled = continueControl.disabled || continueControl.getAttribute("aria-disabled") === "true";
@@ -1131,46 +1734,196 @@ function waitForContinueLink(timeout = 5000, interval = 500) {
         if (pointerEvents !== "none" && !isDisabled) {
           clearInterval(timer);
           console.log("[SparxSolver] Continue control is clickable.");
-          return resolve(continueControl);
+          return resolve({ type: "continue", control: continueControl });
         }
+      }
+
+      const keepGoingControl = findActionControlByText("keep going");
+      if (keepGoingControl) {
+        clearInterval(timer);
+        console.log("[SparxSolver] Keep Going control is clickable.");
+        return resolve({ type: "keep-going", control: keepGoingControl });
       }
 
       if (Date.now() - start > timeout) {
         clearInterval(timer);
-        console.log("[SparxSolver] Continue control timeout.");
+        console.log("[SparxSolver] Post-submit action timeout.");
         return resolve(null);
       }
     }, interval);
   });
 }
 
-function findLinkWithNestedText(text) {
-  const candidateSelectors = [
+function findActionControlByText(text) {
+  const expectedText = text.toLowerCase();
+  const selectors = [
     "button",
     "a",
-    "div[role='button']",
     "[role='button']",
-    "div",
+    "[tabindex]",
+    "[class*='Content']",
+    "[class*='Button']",
+    "[class*='button']",
   ];
+  const candidates = selectors
+    .flatMap((selector) => [...document.querySelectorAll(selector)])
+    .filter((element) => {
+      const actualText = (element.innerText || element.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+      const style = window.getComputedStyle(element);
+      const visible = style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+      return visible && !element.disabled && element.getAttribute("aria-disabled") !== "true" &&
+        (actualText === expectedText || actualText.startsWith(`${expectedText} `));
+    });
 
-  console.log(`[SparxSolver] Finding, ${text}, control...`);
+  candidates.sort((first, second) => {
+    const firstText = (first.innerText || first.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const secondText = (second.innerText || second.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const firstExact = firstText === expectedText;
+    const secondExact = secondText === expectedText;
+    return Number(secondExact) - Number(firstExact) || firstText.length - secondText.length;
+  });
 
-  return candidateSelectors
-    .flatMap(selector => [...document.querySelectorAll(selector)])
-    .find((element) => {
-      const normalizedText = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      return normalizedText === text.toLowerCase() || normalizedText.startsWith(text.toLowerCase());
-    }) || null;
+  for (const candidate of candidates) {
+    const interactiveAncestor = candidate.closest("button, a, [role='button']");
+    const target = interactiveAncestor || candidate;
+    const style = window.getComputedStyle(target);
+    const visible = style.display !== "none" && style.visibility !== "hidden" && target.getClientRects().length > 0;
+    if (visible && !target.disabled && target.getAttribute("aria-disabled") !== "true") {
+      return target;
+    }
+  }
+
+  return null;
+}
+
+function waitForActionControl(text, timeout = 4000, interval = 200) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const control = findActionControlByText(text);
+      if (control || Date.now() - start >= timeout) {
+        clearInterval(timer);
+        resolve(control);
+      }
+    }, interval);
+  });
+}
+
+async function clickNextTask() {
+  const nextTaskControl = await waitForActionControl("next task", 2500);
+  if (nextTaskControl) {
+    console.log("[SparxSolver] Next task control found; continuing.");
+    nextTaskControl.click();
+    return true;
+  }
+
+  return false;
+}
+
+function clickKeepGoing(initialControl = null) {
+  if (keepGoingActivationPromise) {
+    console.info("[SparxSolver] Keep Going activation is already running; joining it.");
+    return keepGoingActivationPromise;
+  }
+
+  const activationPromise = (async () => {
+  let keepGoingControl = initialControl?.isConnected
+    ? initialControl
+    : await waitForActionControl("keep going", 2500);
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (!keepGoingControl?.isConnected) {
+      keepGoingControl = await waitForActionControl("keep going", 1000);
+    }
+    if (!keepGoingControl) break;
+
+    keepGoingControl.scrollIntoView({ block: "center", inline: "center" });
+    const bounds = keepGoingControl.getBoundingClientRect();
+    const eventOptions = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2,
+    };
+
+    console.info(`[SparxSolver] Activating Keep Going text target, attempt ${attempt}/3:`, {
+      tag: keepGoingControl.tagName,
+      className: String(keepGoingControl.className || ""),
+      text: (keepGoingControl.innerText || keepGoingControl.textContent || "").trim(),
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+    });
+
+    keepGoingControl.dispatchEvent(new PointerEvent("pointerdown", eventOptions));
+    keepGoingControl.dispatchEvent(new MouseEvent("mousedown", eventOptions));
+    keepGoingControl.dispatchEvent(new PointerEvent("pointerup", eventOptions));
+    keepGoingControl.dispatchEvent(new MouseEvent("mouseup", eventOptions));
+    keepGoingControl.dispatchEvent(new MouseEvent("click", eventOptions));
+
+    const start = Date.now();
+    while (Date.now() - start < 1000) {
+      await sleep(150);
+      const currentControl = findActionControlByText("keep going");
+      if (!currentControl || !currentControl.isConnected) {
+        console.info("[SparxSolver] Keep Going prompt disappeared after activation.");
+        return true;
+      }
+    }
+
+    console.warn(`[SparxSolver] Keep Going remained visible after attempt ${attempt}/3.`);
+    keepGoingControl = findActionControlByText("keep going");
+  }
+
+  console.error("[SparxSolver] Could not dismiss the Keep Going prompt after 3 activation attempts.");
+  return false;
+  })();
+
+  keepGoingActivationPromise = activationPromise.finally(() => {
+    keepGoingActivationPromise = null;
+  });
+  return keepGoingActivationPromise;
+}
+
+function clickBookworkDidntPrompt() {
+  const dialogSelector = "[role='dialog'], [aria-modal='true'], [class*='Modal'], [class*='Popup']";
+  const dialogs = [...document.querySelectorAll(dialogSelector)];
+
+  for (const dialog of dialogs) {
+    if (!/bookwork/i.test(dialog.textContent || "")) continue;
+
+    const didntControl = [...dialog.querySelectorAll("button, [role='button'], a")].find((control) => {
+      const text = (control.innerText || control.textContent || "").replace(/\s+/g, " ").trim();
+      return /^I\s+didn['’]?t\b/i.test(text) &&
+        !control.disabled &&
+        control.getAttribute("aria-disabled") !== "true" &&
+        control.dataset.sparxSolverDidntClicked !== "true";
+    });
+
+    if (!didntControl) continue;
+
+    chrome.storage.local.get("autoBookworkEnabled", (data) => {
+      if (data.autoBookworkEnabled && didntControl.isConnected) {
+        didntControl.dataset.sparxSolverDidntClicked = "true";
+        console.log("[SparxSolver] Selecting the Bookwork 'I didn't' prompt option.");
+        didntControl.click();
+      }
+    });
+    return true;
+  }
+
+  return false;
+}
+
+function findLinkWithNestedText(text) {
+  return findActionControlByText(text);
 }
 
 function findKeepGoingLink() {
-  const targetAnchor = Array.from(document.querySelectorAll('a')).find(anchor => {
-    const div = anchor.querySelector('div');
-    return div && div.textContent.trim().toLowerCase() === 'keep going';
-  });
-
-  console.log(targetAnchor);
-  return targetAnchor; // Added this so the function outputs the result
+  return findActionControlByText("keep going");
 }
 
 
@@ -1209,15 +1962,23 @@ async function runAutoSolvePageFlow(finalAnswer) {
     return false; // Exit safely, doing nothing
   }
 
-  // Click the Answer button
-  if (!clickAnswerButton()) {
+  if (!(await waitForAnswerControls())) {
+    console.error("[SparxSolver] Answer controls did not appear before the auto-solve timeout.");
     handleAutoSolveFailure();
-    return;
+    return false;
   }
 
-  const submitBtn = await waitForSubmitButton();
-
-  if (!submitBtn) {
+  const answerButton = findAnswerButton();
+  if (answerButton) {
+    answerButton.click();
+    const answerFormSubmitButton = await waitForSubmitButton();
+    if (!answerFormSubmitButton) {
+      console.error("[SparxSolver] Answer form did not open or expose a Submit button.");
+      handleAutoSolveFailure();
+      return;
+    }
+  } else if (!getOrderedAnswerItems().length) {
+    console.error("[SparxSolver] No Answer button or visible answer choices found.");
     handleAutoSolveFailure();
     return;
   }
@@ -1237,10 +1998,18 @@ async function runAutoSolvePageFlow(finalAnswer) {
     return;
   }
 
-  await sleep(150);
-
-  // Click Submit
-  if (!clickSubmitButton(submitBtn)) {
+  const submitWasPresent = !!findButtonWithNestedText("submit");
+  const readySubmitBtn = await waitForSubmitButton(
+    answerButton || submitWasPresent ? 10000 : 3000,
+    100,
+    true
+  );
+  if (readySubmitBtn && !clickSubmitButton(readySubmitBtn)) {
+    handleAutoSolveFailure();
+    return;
+  }
+  if (!readySubmitBtn && (answerButton || submitWasPresent)) {
+    console.error("[SparxSolver] Submit control did not become enabled after answering.");
     handleAutoSolveFailure();
     return;
   }
@@ -1257,16 +2026,29 @@ async function runAutoSolvePageFlow(finalAnswer) {
 
   console.log("[SparxSolver] Waiting for Continue link...");
 
-  const continueLink = await waitForContinueLink();
+  const postSubmitAction = await waitForPostSubmitAction();
 
-  if (!continueLink) {
-    handleAutoSolveFailure();
-    return;
+  if (postSubmitAction?.type === "continue") {
+    console.log("[SparxSolver] Continue link found.");
+    postSubmitAction.control.click();
+    await clickKeepGoing();
+    await clickNextTask();
+  } else if (postSubmitAction?.type === "keep-going") {
+    console.log("[SparxSolver] Keep Going control found.");
+    const clickedKeepGoing = await clickKeepGoing(postSubmitAction.control);
+    const advanced = await clickNextTask() || clickedKeepGoing;
+    if (!advanced) {
+      handleAutoSolveFailure();
+      return;
+    }
+  } else {
+    const clickedKeepGoing = await clickKeepGoing();
+    const advanced = await clickNextTask() || clickedKeepGoing;
+    if (!advanced) {
+      handleAutoSolveFailure();
+      return;
+    }
   }
-
-  console.log("[SparxSolver] Continue link found.");
-
-  continueLink.click();
 
   //now it should repeat as long as the autoSolveEnabled toggle is still on, and the next page has a new answer to solve
 
@@ -1287,7 +2069,9 @@ async function runAutoSolvePageFlow(finalAnswer) {
   let isIframeVisible = false;
   let bodyPointerEventsObserver = null;
   let autoBookworkRunInProgress = false;
+  let keepGoingActivationPromise = null;
   let bookworkObserverTimer = null;
+  let keepGoingAutoClickTimer = null;
 
   function getSolverIframe() {
     return iframe || document.getElementById(IFRAME_ID);
@@ -1296,10 +2080,17 @@ async function runAutoSolvePageFlow(finalAnswer) {
   function applyIframeInteractionStyles(iframeElement) {
     if (!iframeElement) return;
 
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const compactViewport = viewportWidth < 520;
+    const horizontalInset = compactViewport ? 8 : 20;
+
     iframeElement.style.position = "fixed";
-    iframeElement.style.top = "20px";
-    iframeElement.style.right = "20px";
-    iframeElement.style.width = "475px";
+    iframeElement.style.top = `${horizontalInset}px`;
+    iframeElement.style.right = `${horizontalInset}px`;
+    iframeElement.style.width = `${Math.max(0, Math.min(475, viewportWidth - horizontalInset * 2))}px`;
+    iframeElement.style.maxHeight = `${Math.max(240, Math.min(MAX_IFRAME_HEIGHT, viewportHeight - horizontalInset * 2))}px`;
+    iframeElement.style.boxSizing = "border-box";
     iframeElement.style.zIndex = IFRAME_Z_INDEX;
     iframeElement.style.pointerEvents = "auto";
     iframeElement.style.border = "1px solid #dbdbdb";
@@ -1308,6 +2099,10 @@ async function runAutoSolvePageFlow(finalAnswer) {
     iframeElement.style.backgroundColor = "white";
     iframeElement.style.transition = "height 0.2s ease-in-out";
   }
+
+  window.addEventListener("resize", () => {
+    if (isIframeVisible) applyIframeInteractionStyles(getSolverIframe());
+  });
 
   function enablePageAndIframePointerEvents() {
     if (
@@ -1423,7 +2218,7 @@ async function runAutoSolvePageFlow(finalAnswer) {
         return;
       }
 
-      const submitButton = await waitForSubmitButton();
+      const submitButton = await waitForSubmitButton(10000, 100, true);
       if (!submitButton) {
         console.warn("[SparxSolver] Submit button never became enabled after selection.");
         return;
@@ -1434,14 +2229,26 @@ async function runAutoSolvePageFlow(finalAnswer) {
         return;
       }
 
-      const continueLink = await waitForContinueLink();
-      if (!continueLink) {
-        console.warn("[SparxSolver] Continue link never appeared after Bookwork submit.");
-        return;
+      const postSubmitAction = await waitForPostSubmitAction();
+      if (postSubmitAction?.type === "continue") {
+        console.log("[SparxSolver] Continue link found. Proceeding to next screen.");
+        postSubmitAction.control.click();
+        await clickKeepGoing();
+        await clickNextTask();
+      } else if (postSubmitAction?.type === "keep-going") {
+        console.log("[SparxSolver] Keep Going control found.");
+        const clickedKeepGoing = await clickKeepGoing(postSubmitAction.control);
+        const advanced = await clickNextTask() || clickedKeepGoing;
+        if (!advanced) {
+          console.warn("[SparxSolver] Keep Going prompt remained active; stopping bookwork navigation.");
+          return;
+        }
+      } else {
+        const clickedKeepGoing = await clickKeepGoing();
+        const advanced = await clickNextTask() || clickedKeepGoing;
+        if (advanced) return;
+        console.warn("[SparxSolver] No Continue, Summary, or Next task control appeared after Bookwork submit.");
       }
-
-      console.log("[SparxSolver] Continue link found. Proceeding to next screen.");
-      continueLink.click();
     } finally {
       autoBookworkRunInProgress = false;
     }
@@ -1451,12 +2258,32 @@ async function runAutoSolvePageFlow(finalAnswer) {
     clearTimeout(bookworkObserverTimer);
 
     bookworkObserverTimer = setTimeout(() => {
+      if (clickBookworkDidntPrompt()) {
+        return;
+      }
+
       if (!isBookworkCheckPage()) {
         return;
       }
 
       findAndDisplayBookworkAnswer();
       runAutoBookworkSequence();
+    }, delay);
+  }
+
+  function scheduleAutomaticKeepGoingClick(delay = 100) {
+    clearTimeout(keepGoingAutoClickTimer);
+    keepGoingAutoClickTimer = setTimeout(async () => {
+      const settings = await new Promise((resolve) => {
+        chrome.storage.local.get(["autoSolveEnabled", "autoBookworkEnabled"], resolve);
+      });
+      if (!settings.autoSolveEnabled && !settings.autoBookworkEnabled) return;
+
+      const keepGoingControl = findActionControlByText("keep going");
+      if (!keepGoingControl) return;
+
+      console.info("[SparxSolver] Keep Going detected by page observer; auto-activating.");
+      await clickKeepGoing(keepGoingControl);
     }, delay);
   }
 
@@ -1519,9 +2346,8 @@ async function runAutoSolvePageFlow(finalAnswer) {
           if (iframe && event.data.height) {
             // Add a small buffer to prevent scrollbars
             let newHeight = event.data.height + 20;
-            if (newHeight > MAX_IFRAME_HEIGHT) {
-              newHeight = MAX_IFRAME_HEIGHT;
-            }
+            const viewportLimit = Math.max(240, Math.min(MAX_IFRAME_HEIGHT, window.innerHeight - 16));
+            newHeight = Math.min(newHeight, viewportLimit);
             iframe.style.height = `${newHeight}px`;
             applyIframeInteractionStyles(iframe);
           }
@@ -1533,18 +2359,24 @@ async function runAutoSolvePageFlow(finalAnswer) {
   // Add this near the bottom of content.js where your event listeners live
   // Add this near the bottom of content.js
   chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.autoBookworkEnabled) {
-    const isBookworkEnabled = changes.autoBookworkEnabled.newValue;
-    console.log(`[SparxSolver] Auto-Bookwork toggle turned ${isBookworkEnabled ? "ON" : "OFF"}`);
-    
-    // If turned ON, dynamically kick off the sequence right now
-    if (isBookworkEnabled) {
-      scheduleBookworkPageRefresh(0);
+  if (areaName === "local") {
+    if (changes.autoSolveEnabled?.newValue || changes.autoBookworkEnabled?.newValue) {
+      scheduleAutomaticKeepGoingClick(0);
+    }
+
+    if (changes.autoBookworkEnabled) {
+      const isBookworkEnabled = changes.autoBookworkEnabled.newValue;
+      console.log(`[SparxSolver] Auto-Bookwork toggle turned ${isBookworkEnabled ? "ON" : "OFF"}`);
+
+      if (isBookworkEnabled) {
+        scheduleBookworkPageRefresh(0);
+      }
     }
   }
 });
 
   const bookworkPageObserver = new MutationObserver(() => {
+    scheduleAutomaticKeepGoingClick(100);
     if (autoBookworkRunInProgress) {
       return;
     }
@@ -1557,40 +2389,165 @@ async function runAutoSolvePageFlow(finalAnswer) {
     subtree: true,
   });
 
+  scheduleAutomaticKeepGoingClick(0);
+
 
   // Listen for screenshot request from background.js
+  function findQuestionContentElement() {
+    return (
+      document.querySelector('[class*="QuestionWrapper"]') ||
+      document.querySelector('[class^="_Question_"]') ||
+      document.querySelector('[class*="Flashcard"], [class*="FlashCard"], [data-testid*="flashcard" i]') ||
+      document.querySelector("main") ||
+      document.body
+    );
+  }
+
+  function findQuestionAndAnswerContentElement() {
+    let container = findQuestionContentElement();
+    const answerElements = getOrderedAnswerItems(false)
+      .map((item) => item.fieldContainer || item.input || item.answerPart || item.target || item.slot || item.choices?.[0])
+      .filter(Boolean);
+
+    while (container && answerElements.some((element) => !container.contains(element))) {
+      container = container.parentElement;
+    }
+
+    return container || findQuestionContentElement();
+  }
+
+  function describeAnswerLayout() {
+    return getOrderedAnswerItems(false).map((item, index) => {
+      const target = item.fieldContainer || item.input || item.answerPart || item.target || item.slot || item.choices?.[0];
+      const bounds = target?.getBoundingClientRect();
+      const answerPart = item.answerPart || item.input?.closest("[class*='AnswerPart']") || item.target?.parentElement;
+      const nearbyText = (answerPart?.innerText || answerPart?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+
+      return {
+        order: index + 1,
+        type: item.type,
+        placeholder: item.input?.getAttribute("placeholder") || "",
+        ariaLabel: item.input?.getAttribute("aria-label") || "",
+        inputType: item.input?.getAttribute("type") || "",
+        inputMode: item.input?.getAttribute("inputmode") || "",
+        readOnly: Boolean(item.input?.readOnly),
+        pattern: item.input?.getAttribute("pattern") || "",
+        nearbyText: item.type === "numeric" ? getStaticAnswerPartText(item) || nearbyText : nearbyText,
+        x: bounds ? Math.round(bounds.x) : null,
+        y: bounds ? Math.round(bounds.y) : null,
+        choiceCount: item.choices?.length || 0,
+      };
+    });
+  }
+
+  function hasVisibleAnswerControls() {
+    const isVisible = (element) => {
+      if (!element?.isConnected || !element.getClientRects().length) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
+    };
+
+    if (findActionControlByText("answer")) return true;
+
+    return getOrderedAnswerItems(false).some((item) => {
+      const candidates = [
+        item.input,
+        item.target,
+        item.slot,
+        ...(item.choices || []),
+      ];
+      return candidates.some(isVisible);
+    });
+  }
+
+  function waitForAnswerControls(timeout = 30000, interval = 250) {
+    return new Promise((resolve) => {
+      const startedAt = Date.now();
+      const check = () => {
+        if (hasVisibleAnswerControls()) {
+          resolve(true);
+        } else if (Date.now() - startedAt >= timeout) {
+          resolve(false);
+        } else {
+          setTimeout(check, interval);
+        }
+      };
+      check();
+    });
+  }
+
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "getQuestionText") {
+      const questionEl = findQuestionContentElement();
+      const questionText = (questionEl?.innerText || questionEl?.textContent || "")
+        .trim()
+        .slice(0, 12000);
+
+      if (!questionText) {
+        sendResponse({ error: "No visible question or flashcard text was found." });
+      } else {
+        sendResponse({ text: questionText });
+      }
+      return;
+    }
+
     if (request.action === "captureQuestionScreenshot") {
       // Dynamically load html2canvas if not present
-      function doScreenshot() {
-  const questionEl =
-          document.querySelector('[class*="QuestionWrapper"]') ||
-          document.querySelector('[class^="_Question_"]');
+      async function doScreenshot() {
+        if (!(await waitForAnswerControls())) {
+          sendResponse({ error: "The question is still loading or has no visible answer controls. Please wait for the answer area and try again." });
+          return;
+        }
+
+        const questionEl = findQuestionAndAnswerContentElement();
         if (!questionEl) {
           sendResponse({ error: "Question element not found." });
           return;
         }
-        window
-          .html2canvas(questionEl, {
+        const answerLayout = describeAnswerLayout();
+        const [questionCanvas, viewportCanvas] = await Promise.all([
+          window.html2canvas(questionEl, {
             scale: window.devicePixelRatio * 2,
             useCORS: true,
             allowTaint: true,
-          })
-          .then((canvas) => {
-            const dataUrl = canvas.toDataURL();
-            sendResponse({ dataUrl });
-          })
-          .catch((e) => {
-            sendResponse({ error: e.message });
-          });
+          }),
+          window.html2canvas(document.documentElement, {
+            x: window.scrollX,
+            y: window.scrollY,
+            width: window.innerWidth,
+            height: window.innerHeight,
+            windowWidth: window.innerWidth,
+            windowHeight: window.innerHeight,
+            scrollX: window.scrollX,
+            scrollY: window.scrollY,
+            scale: Math.min(window.devicePixelRatio || 1, 1.5),
+            useCORS: true,
+            allowTaint: true,
+          }),
+        ]);
+        sendResponse({
+          dataUrl: questionCanvas.toDataURL(),
+          viewportDataUrl: viewportCanvas.toDataURL(),
+          answerLayout,
+        });
       }
+
+      const handleScreenshotError = (error) => {
+        console.error("[SparxSolver] Question/answer screenshot failed:", error);
+        sendResponse({ error: error.message || "Could not capture the question and answer page." });
+      };
+
       if (window.html2canvas) {
-        doScreenshot();
+        doScreenshot().catch(handleScreenshotError);
       } else {
         // Inject html2canvas if not present
         const script = document.createElement("script");
         script.src = chrome.runtime.getURL("libs/html2canvas.min.js");
-        script.onload = doScreenshot;
+        script.onload = () => doScreenshot().catch(handleScreenshotError);
+        script.onerror = () => handleScreenshotError(new Error("Could not load screenshot support."));
         document.head.appendChild(script);
       }
       return true; // Keep channel open for async response

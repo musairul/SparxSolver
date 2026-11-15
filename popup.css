@@ -46,6 +46,63 @@ body {
   cursor: not-allowed;
 }
 
+#prepareGeminiPromptButton,
+#openGeminiButton {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.gemini-website-toggle {
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid #ddd;
+}
+
+#geminiWebsitePanel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+#geminiWebsitePanel label:not(.toggle-row) {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#showGeminiResponseButton {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+#geminiResponseDisplay {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#geminiHandoff label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#geminiPrompt {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+#geminiHandoffStatus {
+  margin: 0 0 10px;
+  font-size: 0.85em;
+}
+
 #autoSettingsPanel {
   display: flex;
   gap: 8px;
@@ -429,4 +486,43 @@ pre.code-block code {
   padding: 2px 5px;
   display: none; /* Hidden by default */
   margin-right: -175px;
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 8px;
+    font-size: 14px;
+  }
+
+  #header {
+    margin: -8px -8px 8px;
+    padding: 6px 8px;
+  }
+
+  #heading {
+    font-size: 1em;
+  }
+
+  #autoSettingsPanel {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .toggle-row {
+    gap: 4px;
+    font-size: 0.78em;
+  }
+
+  #solveButton,
+  #providerSelect,
+  #saveApiKeyButton,
+  #clearBookworksBtn {
+    min-height: 40px;
+  }
+
+  button,
+  [role="button"],
+  .tab-btn {
+    touch-action: manipulation;
+  }
 }

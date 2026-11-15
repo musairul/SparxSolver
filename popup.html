@@ -54,7 +54,25 @@
           <span class="switch" aria-hidden="true"></span>
         </label>
       </div>
+      <label class="toggle-row gemini-website-toggle" for="geminiWebsiteToggle">
+        <span>Gemini website (manual)</span>
+        <input type="checkbox" id="geminiWebsiteToggle" />
+        <span class="switch" aria-hidden="true"></span>
+      </label>
       <button id="solveButton">Solve Math Problem</button>
+      <div id="geminiWebsitePanel" hidden>
+        <button id="prepareGeminiPromptButton" type="button">Prepare prompt</button>
+        <div id="geminiHandoff" hidden>
+          <label for="geminiPrompt">Prompt to copy into Gemini</label>
+          <textarea id="geminiPrompt" rows="5" readonly></textarea>
+          <button id="openGeminiButton" type="button">Open Gemini</button>
+          <p id="geminiHandoffStatus" role="status"></p>
+          <label for="geminiResponse">Paste Gemini's response</label>
+          <textarea id="geminiResponse" rows="5" placeholder="Paste the response here"></textarea>
+          <button id="showGeminiResponseButton" type="button">Show response</button>
+          <pre id="geminiResponseDisplay" hidden></pre>
+        </div>
+      </div>
       <div id="loadingIndicator">Loading...</div>
       <div id="resultContainer"></div>
     </div>
